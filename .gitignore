@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# =============================================================================
+# Project-specific rules (log-insights-ai-agent)
+# Everything above is GitHub's standard Python template.
+# =============================================================================
+
+# Log data: too large for GitHub, downloaded locally
+data/
