@@ -213,6 +213,12 @@ def check_dataset(dataset: str) -> str | None:
     return None
 
 
+def check_label(dataset: str, label: str | None) -> str | None:
+    if label and dataset != "bgl":
+        return "label exists only in bgl"
+    return None
+
+
 def clamp(value: int | None, default: int, maximum: int) -> int:
     if value is None or value < 1:
         return default
@@ -243,20 +249,21 @@ def ping() -> dict:
 def search_logs(dataset: str, text: str, component: str | None = None,
                 level: str | None = None, team: str | None = None,
                 from_ts: str | None = None, to_ts: str | None = None,
-                limit: int = 20) -> dict:
+                label: str | None = None, limit: int = 20) -> dict:
     """Full-text search over the log message, ranked by relevance (BM25).
 
     Use this to locate concrete evidence: specific errors, IPs, VM ids, request ids.
     dataset: "bgl" (BlueGene/L supercomputer) or "openstack" (Nova cloud logs).
     text: words to search for in the message (case-insensitive word match).
     Optional filters: component, level (e.g. FATAL, ERROR), team (from the ownership
-    table), from_ts / to_ts (ISO timestamps). limit: default 20, max 100.
+    table), from_ts / to_ts (ISO timestamps), label (bgl only: alert category such as
+    APPREAD or KERNDTLB, "-" = no alert). limit: default 20, max 100.
     Returns the most relevant matching rows plus an evidence record with the exact SQL,
     the total number of matches and whether the list was truncated.
     """
     params = {"text": text, "component": component, "level": level, "team": team,
-              "from_ts": from_ts, "to_ts": to_ts, "limit": limit}
-    if (err := check_dataset(dataset)):
+              "from_ts": from_ts, "to_ts": to_ts, "label": label, "limit": limit}
+    if (err := check_dataset(dataset) or check_label(dataset, label)):
         return not_checkable("search_logs", dataset, params, err)
     limit = clamp(limit, 20, 100)
     params["limit"] = limit
@@ -279,6 +286,10 @@ def search_logs(dataset: str, text: str, component: str | None = None,
                            "WHERE dataset = %(dataset)s AND team = %(team)s)")
             qp["team"] = team
             scope.append(f"team = {team}")
+        if label:
+            clauses.append(f"{idx}.label = %(label)s")
+            qp["label"] = label
+            scope.append(f"label = {label}")
         if from_ts:
             clauses.append(f"{idx}.ts >= %(from_ts)s")
             qp["from_ts"] = parse_ts(from_ts, "from_ts")
@@ -419,7 +430,8 @@ def nearby_events(dataset: str, line_no: int | None = None,
 def count_by(dataset: str, group_by: str, text: str | None = None,
              component: str | None = None, level: str | None = None,
              team: str | None = None, from_ts: str | None = None,
-             to_ts: str | None = None, limit: int = 20) -> dict:
+             to_ts: str | None = None, label: str | None = None,
+             limit: int = 20) -> dict:
     """Count log lines per group, largest groups first.
 
     Use this for overviews: which components, nodes, teams or levels produce the most
@@ -427,13 +439,15 @@ def count_by(dataset: str, group_by: str, text: str | None = None,
     group_by for bgl: component, level, team, label, node, rack.
     group_by for openstack: component, level, team, service, http_status,
     instance_id, source_file.
+    Filters: text (substring of the message), component, level, team, from_ts, to_ts,
+    label (bgl only: alert category such as APPREAD, "-" = no alert).
     limit: number of groups, default 20, max 100.
     Returns [{key, count}] plus evidence (rows_matched = all counted rows).
     """
     params = {"group_by": group_by, "text": text, "component": component,
               "level": level, "team": team, "from_ts": from_ts, "to_ts": to_ts,
-              "limit": limit}
-    if (err := check_dataset(dataset)):
+              "label": label, "limit": limit}
+    if (err := check_dataset(dataset) or check_label(dataset, label)):
         return not_checkable("count_by", dataset, params, err)
     allowed = DATASETS[dataset]["group_by"]
     if group_by not in allowed:
@@ -444,7 +458,8 @@ def count_by(dataset: str, group_by: str, text: str | None = None,
     # group_by comes from the whitelist above, so it is safe to inline.
     key = "o.team" if group_by == "team" else f"t.{group_by}"
     try:
-        where, qp, scope = build_where(dataset, text, component, level, team, from_ts, to_ts)
+        where, qp, scope = build_where(dataset, text, component, level, team, from_ts, to_ts,
+                                       extra={"label": label})
         frm = base_from(dataset)
         # COUNT(DISTINCT) ignores NULL, so add 1 if a NULL group exists.
         total_sql = (f"SELECT COUNT(*) AS n, COUNT(DISTINCT {key}) "
@@ -469,23 +484,25 @@ def count_by(dataset: str, group_by: str, text: str | None = None,
 def trend(dataset: str, bucket: str = "hour", text: str | None = None,
           component: str | None = None, level: str | None = None,
           team: str | None = None, from_ts: str | None = None,
-          to_ts: str | None = None) -> dict:
+          to_ts: str | None = None, label: str | None = None) -> dict:
     """Count log lines per time bucket to see when something started, peaked or stopped.
 
     bucket: "minute", "hour" or "day". Use from_ts / to_ts to zoom in before using
-    "minute". Same filters as search_logs (text, component, level, team).
+    "minute". Filters: text (substring of the message), component, level, team, label
+    (bgl only: alert category such as APPREAD, "-" = no alert).
     Returns [{bucket_start, count}] in time order (max 1000 buckets) plus evidence.
     Buckets with zero lines are not listed.
     """
     params = {"bucket": bucket, "text": text, "component": component, "level": level,
-              "team": team, "from_ts": from_ts, "to_ts": to_ts}
-    if (err := check_dataset(dataset)):
+              "team": team, "from_ts": from_ts, "to_ts": to_ts, "label": label}
+    if (err := check_dataset(dataset) or check_label(dataset, label)):
         return not_checkable("trend", dataset, params, err)
     if bucket not in BUCKETS:
         return not_checkable("trend", dataset, params,
                              f"bucket must be one of: {', '.join(sorted(BUCKETS))}")
     try:
-        where, qp, scope = build_where(dataset, text, component, level, team, from_ts, to_ts)
+        where, qp, scope = build_where(dataset, text, component, level, team, from_ts, to_ts,
+                                       extra={"label": label})
         frm = base_from(dataset)
         # bucket comes from the whitelist above, so it is safe to inline.
         bucket_expr = f"date_trunc('{bucket}', t.ts)"
