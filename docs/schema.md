@@ -21,7 +21,7 @@ Status: AGREED — 2026-10-17 15:00, Celil + Berkan
 | `line_no` | BIGINT | 1-based line number in the source file |
 | `raw_line` | VARCHAR | unmodified original line (never dropped) |
 | `ts` | TIMESTAMP | event time parsed from the line |
-| `component` | VARCHAR | emitting component (BGL: the token after `RAS`, not a fixed field, because of the 316 variant lines; OpenStack: module name) |
+| `component` | VARCHAR | emitting component (BGL: the token after the header's `RAS` or `NULL` type marker, accounting for the 316 structural variants; OpenStack: module name) |
 | `level` | VARCHAR | severity as written in the log |
 | `message` | VARCHAR | free-text part used for full-text search |
 | `parse_status` | VARCHAR | `ok` or a variant tag, see below |
@@ -40,7 +40,15 @@ Source: `/data/full/BGL/BGL.log`. Primary key: `line_no`. Core columns plus:
 
 `ts` comes from the precise timestamp (field 5, e.g. `2005-06-03-15.42.50.363779`).
 `parse_status`: `ok`, `variant_kill` (306 lines: node is `-` and the second node field is missing, so all later fields shift left by one; level is still present, e.g. `RAS KERNEL FATAL Kill job ...`), `variant_other` (10 lines: the node field is replaced by a truncated text fragment, followed by `RAS KERNEL INFO ...`; seen at position 9 as `single` 4x, `microseconds` 4x, `0x00544eb8,` 2x).
-Parse by locating the `RAS` token, not by fixed positions. Suggested regex: `^(\S+) (\d+) (\S+) (\S+) (\S+) (?:(.*?) )?RAS (\S+) (\S+) (.*)$` (checked only on 13 sample lines, must match all rows).
+The previous RAS-only regex was incomplete. A full-file check found 104,215 ordinary rows with the type token `NULL` and 34,470 rows without message text. Both are valid `ok` rows; absent `message` becomes SQL NULL. The parser uses the header structure, not an unrestricted search for `RAS` inside the message:
+
+```regex
+^(\S+) (\d+) (\S+) (\S+) (\S+) (?:(.*?) )?(RAS|NULL) (\S+) (\S+)(?: (.*))?$
+```
+
+The repeated location field differs from the first node in eight otherwise regular rows. Keep the first node and do not classify a different repeated node as `variant_other`; that tag identifies the multi-word location fragments. `ts` is parsed without inventing a timezone; `ts_unix` is preserved separately.
+
+Unexpected structures or invalid values are preserved in the prepared CSV with `parse_status = 'parse_error'` and an entry in `data/processed/parse_errors.jsonl`. They block publication to the database until resolved. No agreed column name or type has changed.
 Components: KERNEL, APP, DISCOVERY, MMCS, HARDWARE, MONITOR, LINKCARD, CMCS, BGLMASTER, SERV_NET.
 Lines mentioning IP 172.16.96.116: 59,995, all level FATAL, by label: APPSEV 49,651, APPREAD 5,983, APPRES 2,370, APPTO 1,991.
 
@@ -58,7 +66,7 @@ Sources: `/data/full/OpenStack/openstack_{normal1,normal2,abnormal}.log`. Primar
 | `http_status` | INTEGER | parsed from `status: NNN`, NULL for lines without it |
 | `latency_s` | DOUBLE PRECISION | parsed from `time: X`, NULL for lines without it |
 
-The bracket after the component varies (`[req-… <user> <project> - - -]`, `[req-… - - - - -]`, `[-]`); `message` is everything after the closing bracket.
+The request-context bracket after the component varies (`[req-… <user> <project> - - -]`, `[req-… - - - - -]`, `[-]`); `message` is everything after the closing bracket. There are also 184 traceback rows without a request-context bracket: there the message starts after the component separator, with any additional indentation preserved. These are ordinary `ok` rows with NULL `request_id`. Keep each original physical line as its own row, rather than joining the traceback into one entry.
 `level` must be one of INFO, WARNING, ERROR, CRITICAL. One known line has `w` as level: there `level` is NULL (not guessed) and `parse_status = 'variant_level'`; `raw_line` keeps the original.
 Components (12): nova.osapi_compute.wsgi.server, nova.virt.libvirt.imagecache, nova.compute.manager, nova.metadata.wsgi.server, nova.compute.claims, nova.virt.libvirt.driver, nova.compute.resource_tracker, nova.api.openstack.compute.server_external_events, nova.api.openstack.wsgi, nova.scheduler.host_manager, oslo_service.periodic_task, keystonemiddleware.auth_token.
 "Unknown base file" warning: 838 / 1,951 / 270 rows (1.60 / 1.42 / 1.46 %), so it is not a discriminating signal.
@@ -71,7 +79,7 @@ Source: `/data/full/OpenStack/anomaly_labels.txt` (skip the header sentence).
 |---|---|---|
 | `instance_id` | VARCHAR | primary key, joins with `openstack_logs.instance_id` |
 
-4 rows. Each id has exactly 28 lines in `abnormal` and 0 in the normal files.
+4 rows. Each ID occurs as text in 28 `abnormal` raw lines and 0 normal lines. Only 25 of those lines have the explicit `[instance: <uuid>]` tag, so the agreed `instance_id` field joins 25 rows per VM. Do not broaden that field to arbitrary UUID mentions to force a count of 28; validate the 28 raw mentions and 25 tagged rows separately.
 Ground truth for evaluation and the worked investigation only; no tool exposes it to the agent.
 
 ## `team_ownership`
@@ -113,12 +121,24 @@ Proposal:
 ## Full-text index
 
 `message` in `bgl_logs` and `openstack_logs` gets SereneDB's inverted index (`@@`, BM25).
-Exact DDL: look up with the SereneDB docs MCP, do not guess, then paste it here.
+DDL is in `loader/indexes.sql`. Syntax was checked using the installed SereneDB 26.10.1 documentation (`sdb_docs.search`) and an integration test including refresh and BM25. The core definitions are:
 
 ```sql
--- TODO: CREATE INDEX for bgl_logs.message
--- TODO: CREATE INDEX for openstack_logs.message
+CREATE TEXT SEARCH DICTIONARY log_insights_words AS
+    split_text(case := 'lower') WITH (frequency, position);
+
+CREATE INDEX bgl_logs_message_idx ON bgl_logs USING inverted (
+    line_no, ts, component, level, node, rack, label, is_alert,
+    message log_insights_words
+) INCLUDE (raw_line, ts_unix, parse_status);
+
+CREATE INDEX openstack_logs_message_idx ON openstack_logs USING inverted (
+    source_file, line_no, ts, component, level, service, request_id, instance_id,
+    http_status, message log_insights_words
+) INCLUDE (raw_line, pid, latency_s, parse_status);
 ```
+
+Commit index creation before running `VACUUM (REFRESH_TABLE) bgl_logs` and the equivalent for OpenStack. Full-text queries use the index name, e.g. `SELECT line_no FROM bgl_logs_message_idx WHERE message @@ 'ciod'`. The indexed and included columns expose all log-table fields. SQL aggregation can use the base tables. Ground-truth anomaly labels are not indexed or exposed as agent tools.
 
 ## Evidence record (returned by every tool)
 
@@ -172,13 +192,16 @@ All tools take `dataset` = `bgl` | `openstack`. Optional filters are AND-combine
 | `openstack_logs` rows per `service` | nova-api 102,868, nova-compute 104,086, nova-scheduler 866 |
 | `openstack_logs` with `http_status` not NULL | 98,733 |
 | `openstack_logs` with `level IS NULL` | 1 (`parse_status = 'variant_level'`) |
-| `openstack_logs` with `request_id` not NULL | count and record (not yet measured) |
+| `openstack_logs` with `request_id` not NULL | 192,174 (raw-file check; also checked by loader SQL validation) |
 | `openstack_anomaly_vms` rows | 4 |
-| `openstack_logs` lines per anomaly VM | 28 each, all in `abnormal`, 0 in normal files |
+| `openstack_logs` raw UUID mentions per anomaly VM | 28 each, all in `abnormal`, 0 in normal files |
+| `openstack_logs` joined by tagged `instance_id` per anomaly VM | 25 each, all in `abnormal`, 0 in normal files |
 | components without a `team_ownership` row | 0 |
 
-## Open points
+## Loader implementation
 
-- Full-text index syntax (look up in SereneDB docs, do not guess).
-- Whether a loaded table or a view over `read_csv` is fast enough on 4.7 M rows.
-- Test `VARCHAR`, `TIMESTAMP` and `PRIMARY KEY` in a first small `CREATE TABLE` before loading (`DOUBLE PRECISION` already works).
+- Python streams the original files into immutable CSV generations under `data/processed/run-<id>/`, with explicit column order and SQL NULL handling. The raw files are unchanged. New generations use new paths because replacing an already-read file at the same path exposed stale file contents through the local Docker Desktop mount during testing.
+- `loader/schema.sql` creates materialized tables with the agreed primary keys. VARCHAR, TIMESTAMP, BIGINT, DOUBLE PRECISION, BOOLEAN and composite primary keys are exercised by integration tests.
+- All four tables are loaded and validated inside one transaction. A failed check rolls it back. Existing tables are refused unless `--replace` is explicitly supplied; a failed replacement restores the previous tables.
+- `manifest.json` records source and CSV SHA-256 hashes, row counts, parser statuses and representative records. Import verifies those hashes. SQL checks and their results are saved in `import_report.json` and `validation_report.json`.
+- Run commands and Docker setup are documented in the root README. The larger product workflow and agent tools remain separate work.

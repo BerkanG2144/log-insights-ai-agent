@@ -1,0 +1,23 @@
+dataset,component,team
+bgl,KERNEL,Compute Platform
+bgl,APP,Application Runtime
+bgl,MMCS,Control System
+bgl,BGLMASTER,Control System
+bgl,CMCS,Control System
+bgl,DISCOVERY,Hardware Operations
+bgl,HARDWARE,Hardware Operations
+bgl,MONITOR,Hardware Operations
+bgl,LINKCARD,Network
+bgl,SERV_NET,Network
+openstack,nova.osapi_compute.wsgi.server,Cloud API
+openstack,nova.api.openstack.wsgi,Cloud API
+openstack,nova.api.openstack.compute.server_external_events,Cloud API
+openstack,nova.metadata.wsgi.server,Cloud API
+openstack,keystonemiddleware.auth_token,Cloud API
+openstack,nova.compute.manager,Compute Nodes
+openstack,nova.compute.claims,Compute Nodes
+openstack,nova.compute.resource_tracker,Compute Nodes
+openstack,oslo_service.periodic_task,Compute Nodes
+openstack,nova.virt.libvirt.driver,Virtualization
+openstack,nova.virt.libvirt.imagecache,Virtualization
+openstack,nova.scheduler.host_manager,Scheduling
