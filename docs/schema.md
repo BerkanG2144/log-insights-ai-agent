@@ -4,7 +4,7 @@ Shared interface between the loader (`loader/`, Berkan) and the MCP server (`ser
 Merged from Berkan's draft and Celil's draft, 2026-10-17.
 Rule: after both agree, nobody changes names or types without telling the other.
 
-Status: DRAFT — agreed on: _(time, both initials)_
+Status: AGREED — 2026-10-17 15:00, Celil + Berkan
 
 ## Conventions
 
@@ -21,7 +21,7 @@ Status: DRAFT — agreed on: _(time, both initials)_
 | `line_no` | BIGINT | 1-based line number in the source file |
 | `raw_line` | VARCHAR | unmodified original line (never dropped) |
 | `ts` | TIMESTAMP | event time parsed from the line |
-| `component` | VARCHAR | emitting component (BGL: field 8, OpenStack: module name) |
+| `component` | VARCHAR | emitting component (BGL: the token after `RAS`, not a fixed field, because of the 316 variant lines; OpenStack: module name) |
 | `level` | VARCHAR | severity as written in the log |
 | `message` | VARCHAR | free-text part used for full-text search |
 | `parse_status` | VARCHAR | `ok` or a variant tag, see below |
@@ -39,7 +39,7 @@ Source: `/data/full/BGL/BGL.log`. Primary key: `line_no`. Core columns plus:
 | `is_alert` | BOOLEAN | `label <> '-'` |
 
 `ts` comes from the precise timestamp (field 5, e.g. `2005-06-03-15.42.50.363779`).
-`parse_status`: `ok`, `variant_kill` (306 lines: node is `-` and the second node field is missing, so all later fields shift left by two; level is still present, e.g. `RAS KERNEL FATAL Kill job ...`), `variant_other` (10 lines: the node field is replaced by a truncated text fragment, followed by `RAS KERNEL INFO ...`; seen at position 9 as `single` 4x, `microseconds` 4x, `0x00544eb8,` 2x).
+`parse_status`: `ok`, `variant_kill` (306 lines: node is `-` and the second node field is missing, so all later fields shift left by one; level is still present, e.g. `RAS KERNEL FATAL Kill job ...`), `variant_other` (10 lines: the node field is replaced by a truncated text fragment, followed by `RAS KERNEL INFO ...`; seen at position 9 as `single` 4x, `microseconds` 4x, `0x00544eb8,` 2x).
 Parse by locating the `RAS` token, not by fixed positions. Suggested regex: `^(\S+) (\d+) (\S+) (\S+) (\S+) (?:(.*?) )?RAS (\S+) (\S+) (.*)$` (checked only on 13 sample lines, must match all rows).
 Components: KERNEL, APP, DISCOVERY, MMCS, HARDWARE, MONITOR, LINKCARD, CMCS, BGLMASTER, SERV_NET.
 Lines mentioning IP 172.16.96.116: 59,995, all level FATAL, by label: APPSEV 49,651, APPREAD 5,983, APPRES 2,370, APPTO 1,991.
@@ -181,3 +181,4 @@ All tools take `dataset` = `bgl` | `openstack`. Optional filters are AND-combine
 
 - Full-text index syntax (look up in SereneDB docs, do not guess).
 - Whether a loaded table or a view over `read_csv` is fast enough on 4.7 M rows.
+- Test `VARCHAR`, `TIMESTAMP` and `PRIMARY KEY` in a first small `CREATE TABLE` before loading (`DOUBLE PRECISION` already works).
