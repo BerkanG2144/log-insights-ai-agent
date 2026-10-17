@@ -328,6 +328,8 @@ def nearby_events(dataset: str, line_no: int | None = None,
     or ts (ISO timestamp).
     Optional: restrict to the same node (bgl) or request_id / instance_id (openstack).
     window_seconds: default 60, max 3600. limit: default 50, max 200.
+    If the window holds more lines than limit, the lines closest to the anchor are
+    returned (half before, half after) and truncated is true.
     Returns rows in time order with offset_s relative to the anchor, plus evidence.
     """
     params = {"line_no": line_no, "source_file": source_file, "ts": ts,
@@ -369,15 +371,37 @@ def nearby_events(dataset: str, line_no: int | None = None,
         # 2) Window around the anchor (bounds computed in Python, passed as parameters).
         delta = timedelta(seconds=window_seconds)
         extra = {"node": node, "request_id": request_id, "instance_id": instance_id}
+        if dataset == "openstack" and line_no is not None:
+            # The three OpenStack files are separate recordings: stay in the anchor's file.
+            extra["source_file"] = source_file
         where, qp, scope = build_where(
             dataset, from_ts=(anchor - delta).isoformat(sep=" "),
             to_ts=(anchor + delta).isoformat(sep=" "), extra=extra)
         frm = base_from(dataset)
         count_sql = f"SELECT COUNT(*) AS n {frm} {where}"
-        rows_sql = (f"SELECT {select_columns(dataset)}, o.team {frm} {where} "
-                    f"ORDER BY t.ts LIMIT {limit}")
+        # Keep the anchor in the middle: the lines closest before it and closest after it,
+        # instead of only the earliest lines of the window.
+        qp["anchor"] = anchor
+        half = limit // 2
+        if line_no is not None:
+            # Lines with the same timestamp (e.g. a traceback) are split by line_no,
+            # so lines written after the anchor count as "after".
+            qp["anchor_line"] = line_no
+            before_cond = ("(t.ts < %(anchor)s OR "
+                           "(t.ts = %(anchor)s AND t.line_no <= %(anchor_line)s))")
+            after_cond = ("(t.ts > %(anchor)s OR "
+                          "(t.ts = %(anchor)s AND t.line_no > %(anchor_line)s))")
+        else:
+            before_cond, after_cond = "t.ts <= %(anchor)s", "t.ts > %(anchor)s"
+        before_sql = (f"SELECT {select_columns(dataset)}, o.team {frm} {where} "
+                      f"AND {before_cond} ORDER BY t.ts DESC, t.line_no DESC LIMIT {half}")
+        after_sql = (f"SELECT {select_columns(dataset)}, o.team {frm} {where} "
+                     f"AND {after_cond} ORDER BY t.ts, t.line_no LIMIT {limit - half}")
+        rows_sql = before_sql + "; " + after_sql
         matched = run_query(count_sql, qp)[0]["n"]
-        rows = run_query(rows_sql, qp) if matched else []
+        rows = []
+        if matched:
+            rows = run_query(before_sql, qp)[::-1] + run_query(after_sql, qp)
     except Exception as exc:
         log.exception("nearby_events failed")
         return not_checkable("nearby_events", dataset, params, str(exc))
