@@ -170,11 +170,11 @@ def build_where(dataset: str, text=None, component=None, level=None, team=None,
     clauses, params, scope = [], {"dataset": dataset}, []
 
     if text:
-        # Placeholder until the SereneDB full-text index is set up (schema.md, "Full-text index").
-        # TODO: replace with the inverted-index match (@@) once the DDL is agreed.
+        # Aggregation tools filter the base table by substring; search_logs uses the
+        # full-text index instead. The scope text states which one was used.
         clauses.append("LOWER(t.message) LIKE %(text)s")
         params["text"] = f"%{text.lower()}%"
-        scope.append(f"message contains '{text}'")
+        scope.append(f"message contains '{text}' (substring)")
     if component:
         clauses.append("t.component = %(component)s")
         params["component"] = component
@@ -244,13 +244,14 @@ def search_logs(dataset: str, text: str, component: str | None = None,
                 level: str | None = None, team: str | None = None,
                 from_ts: str | None = None, to_ts: str | None = None,
                 limit: int = 20) -> dict:
-    """Find log lines whose message contains `text`.
+    """Full-text search over the log message, ranked by relevance (BM25).
 
     Use this to locate concrete evidence: specific errors, IPs, VM ids, request ids.
     dataset: "bgl" (BlueGene/L supercomputer) or "openstack" (Nova cloud logs).
+    text: words to search for in the message (case-insensitive word match).
     Optional filters: component, level (e.g. FATAL, ERROR), team (from the ownership
     table), from_ts / to_ts (ISO timestamps). limit: default 20, max 100.
-    Returns matching rows (oldest first) plus an evidence record with the exact SQL,
+    Returns the most relevant matching rows plus an evidence record with the exact SQL,
     the total number of matches and whether the list was truncated.
     """
     params = {"text": text, "component": component, "level": level, "team": team,
@@ -259,14 +260,47 @@ def search_logs(dataset: str, text: str, component: str | None = None,
         return not_checkable("search_logs", dataset, params, err)
     limit = clamp(limit, 20, 100)
     params["limit"] = limit
+    # The inverted index is queried by its own name (see loader/indexes.sql).
+    idx = DATASETS[dataset]["table"] + "_message_idx"
     try:
-        where, qp, scope = build_where(dataset, text, component, level, team, from_ts, to_ts)
-        frm = base_from(dataset)
-        count_sql = f"SELECT COUNT(*) AS n {frm} {where}"
-        rows_sql = (f"SELECT {select_columns(dataset)}, o.team {frm} {where} "
-                    f"ORDER BY t.ts LIMIT {limit}")
+        clauses = [f"{idx}.message @@ %(text)s"]
+        qp: dict = {"text": text, "dataset": dataset}
+        scope = [f"message matches '{text}' (full-text)"]
+        if component:
+            clauses.append(f"{idx}.component = %(component)s")
+            qp["component"] = component
+            scope.append(f"component = {component}")
+        if level:
+            clauses.append(f"{idx}.level = %(level)s")
+            qp["level"] = level.upper()
+            scope.append(f"level = {level.upper()}")
+        if team:
+            clauses.append(f"{idx}.component IN (SELECT component FROM team_ownership "
+                           "WHERE dataset = %(dataset)s AND team = %(team)s)")
+            qp["team"] = team
+            scope.append(f"team = {team}")
+        if from_ts:
+            clauses.append(f"{idx}.ts >= %(from_ts)s")
+            qp["from_ts"] = parse_ts(from_ts, "from_ts")
+            scope.append(f"ts >= {from_ts}")
+        if to_ts:
+            clauses.append(f"{idx}.ts <= %(to_ts)s")
+            qp["to_ts"] = parse_ts(to_ts, "to_ts")
+            scope.append(f"ts <= {to_ts}")
+        where = "WHERE " + " AND ".join(clauses)
+        columns = ", ".join(f"{idx}.{c}" for c in DATASETS[dataset]["columns"])
+        count_sql = f"SELECT COUNT(*) AS n FROM {idx} {where}"
+        rows_sql = (f"SELECT {columns}, BM25({idx}.tableoid) AS score FROM {idx} {where} "
+                    f"ORDER BY score DESC LIMIT {limit}")
         matched = run_query(count_sql, qp)[0]["n"]
         rows = run_query(rows_sql, qp) if matched else []
+        if rows:
+            owners = run_query("SELECT component, team FROM team_ownership "
+                               "WHERE dataset = %(dataset)s", {"dataset": dataset})
+            team_of = {o["component"]: o["team"] for o in owners}
+            for row in rows:
+                row["team"] = team_of.get(row.get("component"))
+        scope = f"{idx} ({DATASETS[dataset]['table']}), " + ", ".join(scope)
     except Exception as exc:
         log.exception("search_logs failed")
         return not_checkable("search_logs", dataset, params, str(exc))
