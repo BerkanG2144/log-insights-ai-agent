@@ -385,7 +385,10 @@ def count_by(dataset: str, group_by: str, text: str | None = None,
     try:
         where, qp, scope = build_where(dataset, text, component, level, team, from_ts, to_ts)
         frm = base_from(dataset)
-        total_sql = f"SELECT COUNT(*) AS n, COUNT(DISTINCT {key}) AS groups {frm} {where}"
+        # COUNT(DISTINCT) ignores NULL, so add 1 if a NULL group exists.
+        total_sql = (f"SELECT COUNT(*) AS n, COUNT(DISTINCT {key}) "
+                     f"+ CASE WHEN COUNT(*) > COUNT({key}) THEN 1 ELSE 0 END AS groups "
+                     f"{frm} {where}")
         rows_sql = (f"SELECT {key} AS key, COUNT(*) AS count {frm} {where} "
                     f"GROUP BY {key} ORDER BY count DESC LIMIT {limit}")
         totals = run_query(total_sql, qp)[0]
@@ -393,9 +396,10 @@ def count_by(dataset: str, group_by: str, text: str | None = None,
     except Exception as exc:
         log.exception("count_by failed")
         return not_checkable("count_by", dataset, params, str(exc))
+    # Truncated if the returned groups do not cover every counted row.
+    covered = sum(row["count"] for row in rows)
     result_evidence = evidence("count_by", dataset, params, rows_sql, scope,
-                               totals["n"], len(rows), limit,
-                               (totals["groups"] or 0) > len(rows))
+                               totals["n"], len(rows), limit, covered < totals["n"])
     result_evidence["groups_total"] = totals["groups"]
     return {"results": clean_rows(rows), "evidence": result_evidence}
 
@@ -424,7 +428,9 @@ def trend(dataset: str, bucket: str = "hour", text: str | None = None,
         frm = base_from(dataset)
         # bucket comes from the whitelist above, so it is safe to inline.
         bucket_expr = f"date_trunc('{bucket}', t.ts)"
-        total_sql = (f"SELECT COUNT(*) AS n, COUNT(DISTINCT {bucket_expr}) AS buckets "
+        # COUNT(DISTINCT) ignores NULL, so add 1 if lines without a timestamp exist.
+        total_sql = (f"SELECT COUNT(*) AS n, COUNT(DISTINCT {bucket_expr}) "
+                     f"+ CASE WHEN COUNT(*) > COUNT(t.ts) THEN 1 ELSE 0 END AS buckets "
                      f"{frm} {where}")
         rows_sql = (f"SELECT {bucket_expr} AS bucket_start, COUNT(*) AS count {frm} {where} "
                     f"GROUP BY {bucket_expr} ORDER BY bucket_start LIMIT {MAX_BUCKETS}")
@@ -433,8 +439,9 @@ def trend(dataset: str, bucket: str = "hour", text: str | None = None,
     except Exception as exc:
         log.exception("trend failed")
         return not_checkable("trend", dataset, params, str(exc))
+    covered = sum(row["count"] for row in rows)
     result_evidence = evidence("trend", dataset, params, rows_sql, scope, totals["n"],
-                               len(rows), MAX_BUCKETS, (totals["buckets"] or 0) > len(rows))
+                               len(rows), MAX_BUCKETS, covered < totals["n"])
     result_evidence["buckets_total"] = totals["buckets"]
     return {"results": clean_rows(rows), "evidence": result_evidence}
 
