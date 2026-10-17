@@ -17,6 +17,8 @@ from dotenv import load_dotenv
 from mcp.server import MCPServer
 from psycopg.rows import dict_row
 
+from roles import ENGINEER, MANAGER, SERVER_INSTRUCTIONS, TEAM_LEAD
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -24,7 +26,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 log = logging.getLogger("log-insights")
 
-mcp = MCPServer("log-insights")
+mcp = MCPServer("log-insights", instructions=SERVER_INSTRUCTIONS)
 
 # ---------------------------------------------------------------------------
 # Dataset configuration (must match docs/schema.md)
@@ -435,6 +437,28 @@ def trend(dataset: str, bucket: str = "hour", text: str | None = None,
                                len(rows), MAX_BUCKETS, (totals["buckets"] or 0) > len(rows))
     result_evidence["buckets_total"] = totals["buckets"]
     return {"results": clean_rows(rows), "evidence": result_evidence}
+
+
+# ---------------------------------------------------------------------------
+# Role prompts (appear in Claude Code as /mcp__log-insights__<name>)
+# ---------------------------------------------------------------------------
+
+@mcp.prompt()
+def engineer(question: str) -> str:
+    """Engineer view: what failed, where, and what happened just before and after."""
+    return ENGINEER.format(question=question)
+
+
+@mcp.prompt()
+def team_lead(question: str) -> str:
+    """Team lead view: recurring problems, how often, which components and teams."""
+    return TEAM_LEAD.format(question=question)
+
+
+@mcp.prompt()
+def manager(question: str) -> str:
+    """Manager view: short, prioritised risks and actions based on measured frequency."""
+    return MANAGER.format(question=question)
 
 
 if __name__ == "__main__":
