@@ -52,11 +52,12 @@ Goal: what failed, in which component, and what happened just before and after.
 
 Suggested tool flow:
 1. search_logs with the key error text (and a time filter if known) to find the
-   failing lines. Prefer level FATAL/ERROR/SEVERE/FAILURE.
+   failing lines. For a known multi-word message, use phrase=true to match adjacent
+   tokens in order. Prefer level FATAL/ERROR/SEVERE/FAILURE.
 2. nearby_events around one representative line (same node for bgl, same
    instance_id or request_id for openstack) to see the events before and after.
 3. count_by or trend to measure how often this error occurs (search hits are word
-   matches, not a count of this exact error).
+   matches by default; phrase=true matches ordered adjacent tokens, not exact characters).
 
 Answer format:
 - What failed: component, node or instance, time range (with counts).

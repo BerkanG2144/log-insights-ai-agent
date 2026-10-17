@@ -249,12 +249,16 @@ def ping() -> dict:
 def search_logs(dataset: str, text: str, component: str | None = None,
                 level: str | None = None, team: str | None = None,
                 from_ts: str | None = None, to_ts: str | None = None,
-                label: str | None = None, limit: int = 20) -> dict:
+                label: str | None = None, limit: int = 20,
+                phrase: bool = False) -> dict:
     """Full-text search over the log message, ranked by relevance (BM25).
 
     Use this to locate concrete evidence: specific errors, IPs, VM ids, request ids.
     dataset: "bgl" (BlueGene/L supercomputer) or "openstack" (Nova cloud logs).
     text: words to search for in the message (case-insensitive word match).
+    phrase: default false (existing word search); true requires adjacent tokens in
+    the given order via phraseto_tsquery. Token matching, not an exact substring.
+    Use phrase=true for a known multi-word error message.
     Optional filters: component, level (e.g. FATAL, ERROR), team (from the ownership
     table), from_ts / to_ts (ISO timestamps), label (bgl only: alert category such as
     APPREAD or KERNDTLB, "-" = no alert). limit: default 20, max 100.
@@ -262,7 +266,8 @@ def search_logs(dataset: str, text: str, component: str | None = None,
     the total number of matches and whether the list was truncated.
     """
     params = {"text": text, "component": component, "level": level, "team": team,
-              "from_ts": from_ts, "to_ts": to_ts, "label": label, "limit": limit}
+              "from_ts": from_ts, "to_ts": to_ts, "label": label, "limit": limit,
+              "phrase": phrase}
     if (err := check_dataset(dataset) or check_label(dataset, label)):
         return not_checkable("search_logs", dataset, params, err)
     limit = clamp(limit, 20, 100)
@@ -270,9 +275,11 @@ def search_logs(dataset: str, text: str, component: str | None = None,
     # The inverted index is queried by its own name (see loader/indexes.sql).
     idx = DATASETS[dataset]["table"] + "_message_idx"
     try:
-        clauses = [f"{idx}.message @@ %(text)s"]
+        query_text = "phraseto_tsquery(%(text)s)" if phrase else "%(text)s"
+        clauses = [f"{idx}.message @@ {query_text}"]
         qp: dict = {"text": text, "dataset": dataset}
-        scope = [f"message matches '{text}' (full-text)"]
+        mode = "full-text phrase, adjacent ordered tokens" if phrase else "full-text"
+        scope = [f"message matches '{text}' ({mode})"]
         if component:
             clauses.append(f"{idx}.component = %(component)s")
             qp["component"] = component

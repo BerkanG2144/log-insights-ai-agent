@@ -174,9 +174,9 @@ All tools take `dataset` = `bgl` or `openstack`. Values are passed as SQL parame
 
 | Tool | Purpose | Main inputs | Returns |
 | --- | --- | --- | --- |
-| `search_logs` | Full-text search over the log message via the inverted index (`@@`), ranked by BM25 | `text`; optional `component`, `level`, `team`, `from_ts`, `to_ts`, `label` (bgl), `limit` (default 20, max 100) | Matching rows with `score` and `team`; total matches in `rows_matched` |
+| `search_logs` | Full-text search over the log message via the inverted index (`@@`), ranked by BM25 | `text`; optional `phrase` (default false; adjacent ordered tokens), `component`, `level`, `team`, `from_ts`, `to_ts`, `label` (bgl), `limit` (default 20, max 100) | Matching rows with `score` and `team`; total matches in `rows_matched` |
 | `nearby_events` | Lines just before and after one anchor line, in time order | `line_no` (+ `source_file` for openstack) or `ts`; `window_seconds` (default 60, max 3600); optional `node` (bgl) or `request_id` / `instance_id` (openstack); `limit` (default 50, max 200) | Half of the limit before and half after the anchor, each with `offset_s`; OpenStack stays in the anchor's file |
-| `count_by` | Counts per group over the complete filtered data, largest first | `group_by` (bgl: component, level, team, label, node, rack; openstack: component, level, team, service, http_status, instance_id, source_file); same filters as `search_logs` (`text` = substring); `limit` (default 20, max 100) | `[{key, count}]`, `groups_total` |
+| `count_by` | Counts per group over the complete filtered data, largest first | `group_by` (bgl: component, level, team, label, node, rack; openstack: component, level, team, service, http_status, instance_id, source_file); structured filters as in `search_logs` (`text` = substring; no `phrase` option); `limit` (default 20, max 100) | `[{key, count}]`, `groups_total` |
 | `trend` | Counts per time bucket over the complete filtered data | `bucket` (`minute`, `hour`, `day`); same filters as `count_by` | `[{bucket_start, count}]` (max 1,000 buckets) plus summary fields computed in the database: `active_buckets`, `first_bucket`, `last_bucket`, `peak_bucket`, `peak_count`, `peak_share`, `null_timestamp_rows` |
 | `ping` | Connection check | – | `{"ok": true}` |
 
@@ -231,14 +231,14 @@ See [docs/worked_investigation.md](docs/worked_investigation.md): one real patte
 
 ## Known limitations
 
-- Full-text search matches words, not phrases: “Error during ComputeManager” returns 4,077 word matches, while the exact message occurs 8 times. Measured claims use `count_by`/`trend`, whose `text` filter is a case-insensitive substring match on the base table. The `scope` field states which method ran.
+- Full-text search defaults to word matching. Set `phrase=true` in `search_logs` to require adjacent tokens in order using `phraseto_tsquery`, with the existing index and BM25 ranking. This is case-insensitive token matching, not an exact character substring; punctuation follows the index dictionary. On the verified corpus, “Error during ComputeManager” returns 4,069 default word matches and 8 phrase matches. “failed to read message prefix” returns 5,983 phrase matches, also 5,983 with `label="APPREAD"`, matching the APPREAD label count; the word `ciod` matches 350,567 lines. `count_by`/`trend` retain their case-insensitive substring filters. The evidence scope states the search method.
 - Counts are log lines, not incidents. One event can write one line per node (e.g. ~510 lines per APPREAD burst) or a multi-line traceback.
 - Burst counts depend on the bucket size (minute, hour, day). “Active days” are days with at least one line, not the calendar span (BGL: 215 active days, 2005-06-03 to 2006-01-04; OpenStack: 3 active days, 2017-05-14 to 2017-05-17).
 - OpenStack covers only a few days, so its recurrence cannot be assessed and it is not directly comparable with BGL.
 - The team ownership mapping is fictional. Cost, downtime and customer impact are not in the logs and are never estimated.
 - Interpretations of alert labels and causes rest on the lines actually inspected and are marked as hypotheses.
 - The agent's wording can vary between runs; numbers come from the tools. Tested with Claude Sonnet 5.5 and Opus 5.5.
-- Not implemented (optional in the challenge): agent-managed indexes, huge remote datasets, traces/metrics, row-level security, phrase or fuzzy search.
+- Not implemented (optional in the challenge): agent-managed indexes, huge remote datasets, traces/metrics, row-level security, fuzzy search.
 
 
 ## Data contract and verification

@@ -170,7 +170,7 @@ All tools take `dataset` = `bgl` | `openstack`. Optional filters are AND-combine
 
 | tool | inputs | returns |
 |---|---|---|
-| `search_logs` | `dataset`, `text`, optional `component`, `level`, `team`, `from_ts`, `to_ts`, `limit` (default 20, max 100) | matching rows + evidence |
+| `search_logs` | `dataset`, `text`, optional `component`, `level`, `team`, `from_ts`, `to_ts`, `label` (bgl only), `limit` (default 20, max 100), `phrase` (default false) | matching rows + evidence |
 | `nearby_events` | `dataset`, `line_no` (+ `source_file` for OpenStack) or `ts`, `window_seconds` (default 60, max 3600), optional `node` or `request_id` / `instance_id`, `limit` (default 50, max 200) | rows around the anchor in time order + evidence |
 | `count_by` | `dataset`, `group_by`, optional `text`, `component`, `level`, `team`, `from_ts`, `to_ts`, `limit` (default 20, max 100) | counts per group, largest first + evidence |
 | `trend` | `dataset`, `bucket` (`minute`, `hour`, `day`), optional `text`, `component`, `level`, `team`, `from_ts`, `to_ts` | counts per time bucket + evidence |
@@ -207,3 +207,7 @@ All tools take `dataset` = `bgl` | `openstack`. Optional filters are AND-combine
 - All four tables are loaded and validated inside one transaction. A failed check rolls it back. Existing tables are refused unless `--replace` is explicitly supplied; a failed replacement restores the previous tables.
 - `manifest.json` records source and CSV SHA-256 hashes, row counts, parser statuses and representative records. Import verifies those hashes. SQL checks and their results are saved in `import_report.json` and `validation_report.json`.
 - Run commands and Docker setup are documented in the root README. The larger product workflow and agent tools remain separate work.
+
+### Optional phrase search
+
+`search_logs(..., phrase=true)` uses `message @@ phraseto_tsquery(text)` on the existing inverted index. Tokens must be adjacent and ordered, with case and punctuation handled by the index dictionary; this is not exact character substring matching. Default `phrase=false` preserves the existing word search. Both the full match count and BM25-ranked results use the same predicate and structured filters. Evidence records include `params.phrase` and the mode in `scope`. Aggregation tools retain their substring semantics and do not accept `phrase`.
