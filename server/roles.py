@@ -36,6 +36,12 @@ tools of this server. Rules for every answer:
 11. Say how many cases you actually examined (e.g. "1 of 8 occurrences inspected").
    Do not derive complete frequency, spread or a shared cause from examples.
 12. If a result is truncated, do not claim a complete picture of it.
+13. Use active_buckets, first_bucket, last_bucket, peak_bucket, peak_count and
+   peak_share from the trend evidence; never compute them yourself. active_buckets means
+   active days only when bucket="day". peak_share is a ratio; show it as a percentage
+   without choosing another peak. If null_timestamp_rows > 0, state that number and do
+   not treat those lines as observations at a time. Do not confuse the last bucket of
+   one problem with the last day of the whole dataset.
 """
 
 ENGINEER = """\
@@ -87,7 +93,8 @@ Suggested tool flow:
 Answer format:
 - Period and scope analysed.
 - Recurring problems: a table with problem, log lines, share of the period, active
-  days, first and last day, component, owning team.
+  days, first and last day (active_buckets, first_bucket, last_bucket from that
+  problem's trend), component, owning team.
 - Pattern over time per problem (from its own trend).
 - What the team should investigate first and why, based on these counts and trends.
 - Evidence list.
@@ -110,21 +117,23 @@ Fixed candidate set (always the same, so repeated answers are comparable):
 
 Suggested tool flow:
 1. The count_by calls above.
-2. trend bucket="day" once per dataset without filters, to know the first and last
-   day of each dataset.
+2. trend bucket="day" once per dataset without filters; its first_bucket and
+   last_bucket are the dataset bounds.
 3. trend bucket="day" for EVERY candidate with its own filter (bgl: label; openstack:
    component and level).
 4. One search_logs call only if needed to name a problem in plain words.
 
 Classification per candidate (an agreed heuristic, not a validated risk model; say so):
-- active_days = number of day buckets with count > 0 (not the calendar span).
-- peak_share = largest day bucket / rows_matched of that candidate's trend.
+- active_days = active_buckets of that candidate's day trend (not the calendar span).
+- peak_share = peak_share of that candidate's trend (with peak_bucket, peak_count).
+  Take both from the evidence; never compute them yourself.
 - If the dataset spans fewer than 7 calendar days: "recurrence not assessable;
   not directly comparable" (this does not mean unimportant).
 - Else if peak_share > 0.5: "burst".
 - Else if active_days >= 5: "recurring".
 - Else: "limited".
-- "Still active" = observed in the last 7 calendar days of that dataset (not today).
+- "Still active" = the candidate's last_bucket lies within the last 7 calendar days
+  before the dataset's last_bucket (not today).
 - If a trend is truncated, do not classify that candidate as complete.
 
 Answer format:

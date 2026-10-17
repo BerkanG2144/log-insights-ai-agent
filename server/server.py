@@ -492,6 +492,11 @@ def trend(dataset: str, bucket: str = "hour", text: str | None = None,
     (bgl only: alert category such as APPREAD, "-" = no alert).
     Returns [{bucket_start, count}] in time order (max 1000 buckets) plus evidence.
     Buckets with zero lines are not listed.
+    The evidence also holds summary fields computed in the database over ALL filtered
+    lines (not only the returned buckets): active_buckets (buckets with lines; active
+    days when bucket="day"), first_bucket, last_bucket, peak_bucket (earliest on ties),
+    peak_count, peak_share (= peak_count / rows_matched) and null_timestamp_rows.
+    Use these fields instead of computing them yourself.
     """
     params = {"bucket": bucket, "text": text, "component": component, "level": level,
               "team": team, "from_ts": from_ts, "to_ts": to_ts, "label": label}
@@ -514,6 +519,7 @@ def trend(dataset: str, bucket: str = "hour", text: str | None = None,
                     f"GROUP BY {bucket_expr} ORDER BY bucket_start LIMIT {MAX_BUCKETS}")
         totals = run_query(total_sql, qp)[0]
         rows = run_query(rows_sql, qp) if totals["n"] else []
+        stats = trend_stats(frm, where, qp, bucket_expr, totals["n"])
     except Exception as exc:
         log.exception("trend failed")
         return not_checkable("trend", dataset, params, str(exc))
@@ -521,7 +527,38 @@ def trend(dataset: str, bucket: str = "hour", text: str | None = None,
     result_evidence = evidence("trend", dataset, params, rows_sql, scope, totals["n"],
                                len(rows), MAX_BUCKETS, covered < totals["n"])
     result_evidence["buckets_total"] = totals["buckets"]
+    result_evidence.update({k: to_json(v) for k, v in stats.items()})
     return {"results": clean_rows(rows), "evidence": result_evidence}
+
+
+def trend_stats(frm: str, where: str, qp: dict, bucket_expr: str, rows_matched: int) -> dict:
+    """Summary of the time distribution over ALL filtered lines (before the bucket limit).
+
+    Lines without a timestamp are counted separately and never form a bucket.
+    """
+    stats = {"active_buckets": 0, "first_bucket": None, "last_bucket": None,
+             "peak_bucket": None, "peak_count": None, "peak_share": None,
+             "null_timestamp_rows": 0}
+    if not rows_matched:
+        return stats
+    ts_where = f"{where} AND t.ts IS NOT NULL" if where else "WHERE t.ts IS NOT NULL"
+    buckets = (f"SELECT {bucket_expr} AS bucket_start, COUNT(*) AS n "
+               f"{frm} {ts_where} GROUP BY {bucket_expr}")
+    summary = run_query(
+        f"SELECT COUNT(*) AS active_buckets, MIN(b.bucket_start) AS first_bucket, "
+        f"MAX(b.bucket_start) AS last_bucket, SUM(b.n) AS ts_rows FROM ({buckets}) b", qp)[0]
+    stats["active_buckets"] = summary["active_buckets"] or 0
+    stats["first_bucket"] = summary["first_bucket"]
+    stats["last_bucket"] = summary["last_bucket"]
+    stats["null_timestamp_rows"] = rows_matched - int(summary["ts_rows"] or 0)
+    if stats["active_buckets"]:
+        peak = run_query(
+            f"SELECT b.bucket_start, b.n FROM ({buckets}) b "
+            f"ORDER BY b.n DESC, b.bucket_start LIMIT 1", qp)[0]
+        stats["peak_bucket"] = peak["bucket_start"]
+        stats["peak_count"] = int(peak["n"])
+        stats["peak_share"] = round(int(peak["n"]) / rows_matched, 6)
+    return stats
 
 
 # ---------------------------------------------------------------------------
