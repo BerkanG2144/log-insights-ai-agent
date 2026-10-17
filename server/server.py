@@ -290,8 +290,11 @@ def search_logs(dataset: str, text: str, component: str | None = None,
         where = "WHERE " + " AND ".join(clauses)
         columns = ", ".join(f"{idx}.{c}" for c in DATASETS[dataset]["columns"])
         count_sql = f"SELECT COUNT(*) AS n FROM {idx} {where}"
+        # Tie-breaker on the line position keeps results identical between runs.
+        tie = (f"{idx}.source_file, {idx}.line_no" if dataset == "openstack"
+               else f"{idx}.line_no")
         rows_sql = (f"SELECT {columns}, BM25({idx}.tableoid) AS score FROM {idx} {where} "
-                    f"ORDER BY score DESC LIMIT {limit}")
+                    f"ORDER BY score DESC, {tie} LIMIT {limit}")
         matched = run_query(count_sql, qp)[0]["n"]
         rows = run_query(rows_sql, qp) if matched else []
         if rows:
