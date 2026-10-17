@@ -1,109 +1,89 @@
-# Schema and tool contracts
+# Schema and tool contract
 
 Shared interface between the loader (`loader/`, Berkan) and the MCP server (`server/`, Celil).
-**Do not rename tables, columns or tool fields without telling the other person.**
+Merged from Berkan's draft and Celil's draft, 2026-10-17.
+Rule: after both agree, nobody changes names or types without telling the other.
 
-Status: DRAFT — agreed on: _(date/time, both initials)_
+Status: DRAFT — agreed on: _(time, both initials)_
 
----
+## Conventions
 
-## 1. Conventions
-
-- Table and column names: `snake_case`, English.
+- Names in `snake_case`, English.
 - Every row keeps its original text in `raw_line`. No line is dropped silently.
-- Missing or unparsable values are `NULL`, never an empty string or a made-up value.
-- Timestamps are `TIMESTAMP` without time zone (the logs have no time zone; we treat them as local log time).
+- Missing or unparsable values are `NULL`, never an empty string.
 - File paths in SQL always start with `/data/...` (Docker mount, same on Windows and Linux).
+- New datasets later = new table with the common core plus dataset-specific columns.
 
----
+## Common core columns (every log table)
 
-## 2. Table `bgl_logs`
-
-Source: `/data/full/BGL/BGL.log` (4,747,963 lines).
-
-Example line:
-
-```
-- 1117838570 2005.06.03 R02-M1-N0-C:J12-U11 2005-06-03-15.42.50.363779 R02-M1-N0-C:J12-U11 RAS KERNEL INFO instruction cache parity error corrected
-```
-
-| Column | Type | From field | Notes |
-|---|---|---|---|
-| `line_no` | BIGINT | — | 1-based line number in the file. Primary key. |
-| `raw_line` | TEXT | whole line | Unchanged original. |
-| `label` | TEXT | ① | `-` = normal, otherwise alert type (41 values, e.g. `KERNDTLB`, `APPREAD`). |
-| `is_alert` | BOOLEAN | ① | `label <> '-'`. |
-| `ts_unix` | BIGINT | ② | Unix seconds. |
-| `ts` | TIMESTAMP | ⑤ | `2005-06-03-15.42.50.363779` → `2005-06-03 15:42:50.363779`. Main time column. |
-| `node` | TEXT | ④ | e.g. `R02-M1-N0-C:J12-U11`; also `NULL`, `UNKNOWN_LOCATION`, `-` as in the file. |
-| `rack` | TEXT | ④ | Prefix before the first `-` if it matches `R\d\d` (e.g. `R02`), else `NULL`. |
-| `event_type` | TEXT | ⑦ | `RAS` or `NULL`. |
-| `component` | TEXT | ⑧ | KERNEL, APP, DISCOVERY, MMCS, HARDWARE, MONITOR, LINKCARD, CMCS, BGLMASTER, SERV_NET. |
-| `level` | TEXT | ⑨ | INFO, FATAL, ERROR, WARNING, SEVERE, FAILURE. |
-| `message` | TEXT | ⑩ | Rest of the line. **Full-text index.** |
-| `parse_status` | TEXT | — | `ok`, `variant_kill` (306 lines, `Kill` at position 9), `variant_other` (10 lines). |
-
-Dropped as redundant (still in `raw_line`): ③ date, ⑥ node repeat.
-
-For `variant_*` rows: fill only what is safely parsable (`label`, `ts_unix`, `ts`, `node`), rest `NULL`, `message` = text after field ⑧.
-
----
-
-## 3. Table `openstack_logs`
-
-Sources: `/data/full/OpenStack/openstack_normal1.log` (52,312), `openstack_normal2.log` (137,074), `openstack_abnormal.log` (18,434).
-
-Example lines:
-
-```
-nova-api.log.1.2017-05-16_13:53:08 2017-05-16 00:00:00.008 25746 INFO nova.osapi_compute.wsgi.server [req-38101a0b-... 113d3a99... 54fadb41... - - -] 10.11.10.1 "GET /v2/.../servers/detail HTTP/1.1" status: 200 len: 1893 time: 0.2477829
-nova-compute.log.2017-05-14_21:27:09 2017-05-14 19:39:03.166 2931 INFO nova.compute.manager [-] [instance: 2b590f10-49fd-4ec9-ae41-19596c2f4b25] VM Stopped (Lifecycle Event)
-```
-
-| Column | Type | Notes |
+| column | type | meaning |
 |---|---|---|
-| `source_file` | TEXT | `normal1`, `normal2`, `abnormal`. |
-| `line_no` | BIGINT | 1-based within `source_file`. Primary key = (`source_file`, `line_no`). |
-| `raw_line` | TEXT | Unchanged original. |
-| `log_name` | TEXT | First field, e.g. `nova-api.log.1.2017-05-16_13:53:08`. |
-| `service` | TEXT | From `log_name`: `api`, `compute`, `scheduler`. |
-| `ts` | TIMESTAMP | Fields 2+3, e.g. `2017-05-16 00:00:00.008`. |
-| `pid` | INTEGER | |
-| `level` | TEXT | INFO, WARNING, ERROR, CRITICAL. |
-| `component` | TEXT | e.g. `nova.osapi_compute.wsgi.server`, `nova.compute.manager` (12 values). |
-| `request_id` | TEXT | `req-...` from the bracket, `NULL` if `[-]`. |
-| `instance_id` | TEXT | UUID from `[instance: ...]`, else `NULL`. |
-| `http_status` | INTEGER | From `status: NNN`, else `NULL` (200, 202, 204, 404, 503). |
-| `latency_s` | DOUBLE | From `time: N.NNN`, else `NULL`. |
-| `message` | TEXT | Everything after the request bracket. **Full-text index.** |
+| `line_no` | BIGINT | 1-based line number in the source file |
+| `raw_line` | VARCHAR | unmodified original line (never dropped) |
+| `ts` | TIMESTAMP | event time parsed from the line |
+| `component` | VARCHAR | emitting component (BGL: field 8, OpenStack: module name) |
+| `level` | VARCHAR | severity as written in the log |
+| `message` | VARCHAR | free-text part used for full-text search |
+| `parse_status` | VARCHAR | `ok` or a variant tag, see below |
 
----
+## `bgl_logs`
 
-## 4. Table `openstack_anomaly_vms`
+Source: `/data/full/BGL/BGL.log`. Primary key: `line_no`. Core columns plus:
 
-Source: `/data/full/OpenStack/anomaly_labels.txt` (4 UUIDs, skip the header sentence).
-
-| Column | Type | Notes |
+| column | type | meaning |
 |---|---|---|
-| `instance_id` | TEXT | Primary key. Joins with `openstack_logs.instance_id`. |
+| `ts_unix` | BIGINT | Unix time, field 2 |
+| `node` | VARCHAR | node id, field 4; NULL where it is `-` |
+| `rack` | VARCHAR | rack prefix of the node, e.g. `R02` (NULL if the node has no `Rnn-` prefix) |
+| `label` | VARCHAR | field 1, `-` means normal |
+| `is_alert` | BOOLEAN | `label <> '-'` |
 
-Used only as ground truth for evaluation and the worked investigation, **not** as a tool input the agent can "peek" at for answers.
+`ts` comes from the precise timestamp (field 5, e.g. `2005-06-03-15.42.50.363779`).
+`parse_status`: `ok`, `variant_kill` (306 lines: node is `-` and the second node field is missing, so all later fields shift left by two; level is still present, e.g. `RAS KERNEL FATAL Kill job ...`), `variant_other` (10 lines: the node field is replaced by a truncated text fragment, followed by `RAS KERNEL INFO ...`; seen at position 9 as `single` 4x, `microseconds` 4x, `0x00544eb8,` 2x).
+Parse by locating the `RAS` token, not by fixed positions. Suggested regex: `^(\S+) (\d+) (\S+) (\S+) (\S+) (?:(.*?) )?RAS (\S+) (\S+) (.*)$` (checked only on 13 sample lines, must match all rows).
+Components: KERNEL, APP, DISCOVERY, MMCS, HARDWARE, MONITOR, LINKCARD, CMCS, BGLMASTER, SERV_NET.
+Lines mentioning IP 172.16.96.116: 59,995, all level FATAL, by label: APPSEV 49,651, APPREAD 5,983, APPRES 2,370, APPTO 1,991.
 
----
+## `openstack_logs`
 
-## 5. Table `team_ownership`
+Sources: `/data/full/OpenStack/openstack_{normal1,normal2,abnormal}.log`. Primary key: (`source_file`, `line_no`). Core columns plus:
 
-Fictional mapping, documented as such in the README.
-
-| Column | Type | Notes |
+| column | type | meaning |
 |---|---|---|
-| `dataset` | TEXT | `bgl` or `openstack`. |
-| `component` | TEXT | Exactly as in the log tables. |
-| `team` | TEXT | Fictional team name. |
+| `source_file` | VARCHAR | `normal1`, `normal2`, `abnormal` |
+| `pid` | INTEGER | process id |
+| `service` | VARCHAR | `nova-compute`, `nova-api`, `nova-scheduler`, taken from the log file name at the start of each line |
+| `request_id` | VARCHAR | matched by pattern `\[(req-[0-9a-f-]{36})`, not by position; NULL if no match (e.g. `[-]`) |
+| `instance_id` | VARCHAR | VM id from `[instance: <uuid>]` if present, else NULL |
+| `http_status` | INTEGER | parsed from `status: NNN`, NULL for lines without it |
+| `latency_s` | DOUBLE PRECISION | parsed from `time: X`, NULL for lines without it |
 
-Primary key = (`dataset`, `component`). Every component that appears in the logs must have exactly one row (check with an anti-join after loading).
+The bracket after the component varies (`[req-… <user> <project> - - -]`, `[req-… - - - - -]`, `[-]`); `message` is everything after the closing bracket.
+`level` must be one of INFO, WARNING, ERROR, CRITICAL. One known line has `w` as level: there `level` is NULL (not guessed) and `parse_status = 'variant_level'`; `raw_line` keeps the original.
+Components (12): nova.osapi_compute.wsgi.server, nova.virt.libvirt.imagecache, nova.compute.manager, nova.metadata.wsgi.server, nova.compute.claims, nova.virt.libvirt.driver, nova.compute.resource_tracker, nova.api.openstack.compute.server_external_events, nova.api.openstack.wsgi, nova.scheduler.host_manager, oslo_service.periodic_task, keystonemiddleware.auth_token.
+"Unknown base file" warning: 838 / 1,951 / 270 rows (1.60 / 1.42 / 1.46 %), so it is not a discriminating signal.
 
-Proposal (to be agreed):
+## `openstack_anomaly_vms`
+
+Source: `/data/full/OpenStack/anomaly_labels.txt` (skip the header sentence).
+
+| column | type | meaning |
+|---|---|---|
+| `instance_id` | VARCHAR | primary key, joins with `openstack_logs.instance_id` |
+
+4 rows. Each id has exactly 28 lines in `abnormal` and 0 in the normal files.
+Ground truth for evaluation and the worked investigation only; no tool exposes it to the agent.
+
+## `team_ownership`
+
+| column | type | meaning |
+|---|---|---|
+| `dataset` | VARCHAR | `bgl` or `openstack` |
+| `component` | VARCHAR | matches `component` in the log tables |
+| `team` | VARCHAR | invented team name, documented as fictional in the README |
+
+Primary key: (`dataset`, `component`). Every component in the logs has exactly one row.
+Proposal:
 
 | dataset | component | team |
 |---|---|---|
@@ -130,87 +110,74 @@ Proposal (to be agreed):
 | openstack | nova.virt.libvirt.imagecache | Virtualization |
 | openstack | nova.scheduler.host_manager | Scheduling |
 
----
+## Full-text index
 
-## 6. Full-text index
-
-`message` in `bgl_logs` and `openstack_logs` gets SereneDB's inverted index, so `search_logs` can use `@@` with BM25 ranking.
-Exact DDL and analyzer: **look up with the SereneDB docs MCP before writing it** (do not guess), then paste the final statement here:
+`message` in `bgl_logs` and `openstack_logs` gets SereneDB's inverted index (`@@`, BM25).
+Exact DDL: look up with the SereneDB docs MCP, do not guess, then paste it here.
 
 ```sql
--- TODO: final CREATE INDEX statement for bgl_logs.message
--- TODO: final CREATE INDEX statement for openstack_logs.message
+-- TODO: CREATE INDEX for bgl_logs.message
+-- TODO: CREATE INDEX for openstack_logs.message
 ```
 
----
-
-## 7. Evidence record (returned by every tool)
+## Evidence record (returned by every tool)
 
 ```json
 {
   "results": [],
   "evidence": {
+    "query_id": "Q1",
     "tool": "search_logs",
     "dataset": "bgl",
-    "params": {"text": "failed to read message prefix", "limit": 5},
+    "params": {},
     "sql": "SELECT ...",
     "scope": "bgl_logs, all rows",
-    "rows_matched": 253,
-    "rows_returned": 5,
-    "limit": 5,
-    "truncated": true,
+    "rows_matched": 0,
+    "rows_returned": 0,
+    "limit": 0,
+    "truncated": false,
     "status": "ok"
   }
 }
 ```
 
-- `status`: `ok` | `not_checkable` (field missing, filter not supported, query error) | `empty` (query ran, 0 rows).
-- With `not_checkable` the evidence also carries `"reason": "..."`.
-- Aggregations: `truncated` is `false` unless groups were cut by `top`; `rows_matched` = number of underlying rows.
-- `sql` is the exact statement sent, with parameters shown separately in `params` (no string-built SQL).
+`status` is `ok`, `empty` or `not_checkable`. `not_checkable` always comes with `reason` (for example "no instance_id in these rows"). `truncated` is `true` whenever `rows_matched > rows_returned` (for aggregations: groups cut by `limit`).
+`sql` is the exact statement; values are passed as parameters, never string-built.
 
----
+## Tools (names as in the team rules)
 
-## 8. Tool contracts
+All tools take `dataset` = `bgl` | `openstack`. Optional filters are AND-combined.
 
-All tools take `dataset`: `"bgl"` | `"openstack"`.
-Common optional filters (`filters` object, all AND-combined): `level`, `component`, `team`, `start`, `end` (ISO timestamps), plus `node`, `rack`, `label`, `is_alert` (BGL) or `service`, `instance_id`, `request_id`, `http_status`, `source_file` (OpenStack).
-`team` is resolved via `team_ownership`.
+| tool | inputs | returns |
+|---|---|---|
+| `search_logs` | `dataset`, `text`, optional `component`, `level`, `team`, `from_ts`, `to_ts`, `limit` (default 20, max 100) | matching rows + evidence |
+| `nearby_events` | `dataset`, `line_no` (+ `source_file` for OpenStack) or `ts`, `window_seconds` (default 60, max 3600), optional `node` or `request_id` / `instance_id`, `limit` (default 50, max 200) | rows around the anchor in time order + evidence |
+| `count_by` | `dataset`, `group_by`, optional `text`, `component`, `level`, `team`, `from_ts`, `to_ts`, `limit` (default 20, max 100) | counts per group, largest first + evidence |
+| `trend` | `dataset`, `bucket` (`minute`, `hour`, `day`), optional `text`, `component`, `level`, `team`, `from_ts`, `to_ts` | counts per time bucket + evidence |
 
-### `search_logs`
-Full-text search over `message`.
-- In: `dataset`, `text`, `filters?`, `limit` (default 20, max 100).
-- Out `results[]`: `line_no` (+ `source_file`), `ts`, `level`, `component`, `node` / `instance_id`, `message`, `score`.
+`group_by` whitelist (anything else → `not_checkable`): `component`, `level`, `team`, `label`, `node`, `rack`, `service`, `http_status`, `instance_id`, `source_file`.
+`team` is resolved by joining `team_ownership`.
+`check_hypothesis` comes later and reuses the same evidence record per check.
 
-### `nearby_events`
-Lines around one anchor line, in time order.
-- In: `dataset`, `line_no` (+ `source_file` for OpenStack), `window_s` (default 60, max 3600), `same_entity` (bool: same `node` / `instance_id`), `limit` (default 50, max 200).
-- Out `results[]`: same shape as `search_logs`, plus `offset_s` relative to the anchor.
+## Import check (reference counts, all checked against the files)
 
-### `count_by`
-Counts grouped by one column.
-- In: `dataset`, `group_by` (whitelist: `level`, `component`, `team`, `label`, `node`, `rack`, `service`, `http_status`, `instance_id`, `source_file`), `filters?`, `top` (default 20, max 100).
-- Out `results[]`: `{ "key": ..., "count": ... }`, sorted by `count` desc.
-
-### `trend`
-Counts per time bucket.
-- In: `dataset`, `bucket` (`minute` | `hour` | `day`), `filters?`, `text?` (optional full-text filter).
-- Out `results[]`: `{ "bucket_start": ..., "count": ... }`, in time order, empty buckets included as 0.
-
-Later (Sunday): `check_hypothesis` with check types `burst` and `rate_vs_baseline`.
-
----
-
-## 9. Import check (reference counts)
-
-| Check | Expected |
+| check | expected |
 |---|---|
 | `bgl_logs` rows | 4,747,963 |
 | `bgl_logs` with `label = '-'` | 4,399,503 |
 | `bgl_logs` with `is_alert` | 348,460 |
 | `bgl_logs` with `label = 'APPREAD'` | 5,983 |
-| `bgl_logs` with `parse_status <> 'ok'` | 316 |
-| `openstack_logs` rows per `source_file` | normal1 52,312 · normal2 137,074 · abnormal 18,434 |
+| `bgl_logs` with `parse_status <> 'ok'` | 316 (306 `variant_kill`, 10 `variant_other`) |
+| `openstack_logs` rows per `source_file` | 52,312 / 137,074 / 18,434 |
+| `openstack_logs` rows per `service` | nova-api 102,868, nova-compute 104,086, nova-scheduler 866 |
 | `openstack_logs` with `http_status` not NULL | 98,733 |
+| `openstack_logs` with `level IS NULL` | 1 (`parse_status = 'variant_level'`) |
+| `openstack_logs` with `request_id` not NULL | count and record (not yet measured) |
 | `openstack_anomaly_vms` rows | 4 |
+| `openstack_logs` lines per anomaly VM | 28 each, all in `abnormal`, 0 in normal files |
 | components without a `team_ownership` row | 0 |
+
+## Open points
+
+- Full-text index syntax (look up in SereneDB docs, do not guess).
+- Whether a loaded table or a view over `read_csv` is fast enough on 4.7 M rows.
