@@ -67,7 +67,7 @@ Sources: `/data/full/OpenStack/openstack_{normal1,normal2,abnormal}.log`. Primar
 | `latency_s` | DOUBLE PRECISION | parsed from `time: X`, NULL for lines without it |
 
 The request-context bracket after the component varies (`[req-… <user> <project> - - -]`, `[req-… - - - - -]`, `[-]`); `message` is everything after the closing bracket. There are also 184 traceback rows without a request-context bracket: there the message starts after the component separator, with any additional indentation preserved. These are ordinary `ok` rows with NULL `request_id`. Keep each original physical line as its own row, rather than joining the traceback into one entry.
-`level` must be one of INFO, WARNING, ERROR, CRITICAL. One known line has `w` as level: there `level` is NULL (not guessed) and `parse_status = 'variant_level'`; `raw_line` keeps the original.
+`level` must be one of INFO, WARNING, ERROR, CRITICAL. The verified original corpus has 204,506 INFO, 3,118 WARNING, 194 ERROR and 2 CRITICAL rows, with no missing levels or `variant_level` rows. An earlier local copy had `w` instead of `ERROR` at normal1 line 27179; this is not an original dataset variant. The parser still defensively retains `w` as NULL with `parse_status = 'variant_level'` and preserves `raw_line`, but full-corpus validation rejects that altered corpus. Original file fingerprints are documented in the root README.
 Components (12): nova.osapi_compute.wsgi.server, nova.virt.libvirt.imagecache, nova.compute.manager, nova.metadata.wsgi.server, nova.compute.claims, nova.virt.libvirt.driver, nova.compute.resource_tracker, nova.api.openstack.compute.server_external_events, nova.api.openstack.wsgi, nova.scheduler.host_manager, oslo_service.periodic_task, keystonemiddleware.auth_token.
 "Unknown base file" warning: 838 / 1,951 / 270 rows (1.60 / 1.42 / 1.46 %), so it is not a discriminating signal.
 
@@ -191,7 +191,9 @@ All tools take `dataset` = `bgl` | `openstack`. Optional filters are AND-combine
 | `openstack_logs` rows per `source_file` | 52,312 / 137,074 / 18,434 |
 | `openstack_logs` rows per `service` | nova-api 102,868, nova-compute 104,086, nova-scheduler 866 |
 | `openstack_logs` with `http_status` not NULL | 98,733 |
-| `openstack_logs` with `level IS NULL` | 1 (`parse_status = 'variant_level'`) |
+| `openstack_logs` with `level IS NULL` | 0 |
+| `openstack_logs` with `parse_status = 'variant_level'` | 0 |
+| `openstack_logs` rows per `level` | INFO 204,506, WARNING 3,118, ERROR 194, CRITICAL 2 |
 | `openstack_logs` with `request_id` not NULL | 192,174 (raw-file check; also checked by loader SQL validation) |
 | `openstack_anomaly_vms` rows | 4 |
 | `openstack_logs` raw UUID mentions per anomaly VM | 28 each, all in `abnormal`, 0 in normal files |

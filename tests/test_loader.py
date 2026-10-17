@@ -98,7 +98,7 @@ class OpenStackTests(unittest.TestCase):
         self.assertIsNone(row["instance_id"])
         self.assertEqual(row["message"], "normal background work")
 
-    def test_known_w_level_is_not_guessed(self):
+    def test_synthetic_w_level_is_not_guessed(self):
         row = openstack.parse_line(OPENSTACK.replace(" INFO ", " w "), 27179, "normal1")
         self.assertIsNone(row["level"])
         self.assertEqual(row["parse_status"], "variant_level")

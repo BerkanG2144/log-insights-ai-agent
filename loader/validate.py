@@ -99,13 +99,13 @@ def validate(conn, manifest: dict | None = None, *, check_indexes: bool = False)
     for name, expected in {
         "rows": 207_820, "http_status": 98_733, "latency_s": 98_733,
         "request_id": 192_174, "instance_id": 51_553,
-        "missing_level": 1, "variant_level": 1, "unexpected_status": 0, "missing_required": 0,
+        "missing_level": 0, "variant_level": 0, "unexpected_status": 0, "missing_required": 0,
     }.items():
         check("openstack." + name, rows[0][name], expected, qid)
 
     qid, rows = query("SELECT level, COUNT(*) AS rows FROM openstack_logs GROUP BY level ORDER BY level")
     check("openstack.level_counts", {r["level"] or "NULL": r["rows"] for r in rows}, {
-        "INFO": 204_506, "WARNING": 3_118, "ERROR": 193, "CRITICAL": 2, "NULL": 1,
+        "INFO": 204_506, "WARNING": 3_118, "ERROR": 194, "CRITICAL": 2,
     }, qid)
     qid, rows = query("""
         SELECT source_file, COUNT(*) AS rows FROM openstack_logs

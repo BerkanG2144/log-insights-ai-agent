@@ -28,6 +28,16 @@ data/full/OpenStack/anomaly_labels.txt
 
 Original archives: [BGL](https://zenodo.org/records/8196385/files/BGL.zip?download=1), [OpenStack](https://zenodo.org/records/8196385/files/OpenStack.tar.gz?download=1). Use the full datasets here, not the 2,000-line samples.
 
+Verify the extracted OpenStack logs with `sha256sum data/full/OpenStack/*.log`. Expected SHA-256 fingerprints from the original archive (archive MD5: `66bd42c07837a094d9b0ea2d036b5713`):
+
+```text
+7ab718fbb2f2b804893955cecf37ad9533cfa0efaf5b03009474d5bb019b6af4  openstack_abnormal.log
+4e4d47347bdae198056bb3b0a8a755e1cb0100d6c6a30bbd4058684234769199  openstack_normal1.log
+3c51741dcea1fb0731d1f86588b12587707e7abea01e725ee16c9441b8b68db7  openstack_normal2.log
+```
+
+An earlier local `normal1` copy contained `w` instead of `ERROR` at line 27179. That copy is not the original corpus. Full-corpus validation expects 194 ERROR rows, no missing levels and no `variant_level` rows; restore the original input rather than relaxing these checks.
+
 For a **new** container, create the host data directory and mount it at `/data`:
 
 ```bash
@@ -74,7 +84,7 @@ See [docs/schema.md](docs/schema.md) for the shared contract and [loader/schema.
 
 - Expected corpus: 4,747,963 BGL rows and 207,820 OpenStack rows (52,312 normal1 / 137,074 normal2 / 18,434 abnormal).
 - BGL retains the 306 `variant_kill` and ten `variant_other` records. The 104,215 `NULL` type markers and 34,470 absent messages are ordinary supported rows. Time is taken from the precise timestamp without assuming a timezone.
-- OpenStack retains missing optional fields as SQL NULL, including 184 traceback lines without a request-context bracket. Their indentation and separate line numbers are preserved. The known `w` level becomes NULL with `variant_level`, rather than a guessed severity.
+- OpenStack retains missing optional fields as SQL NULL, including 184 traceback lines without a request-context bracket. Their indentation and separate line numbers are preserved. The parser defensively retains a `w` level as NULL with `variant_level`, rather than guessing a severity; the verified original corpus contains no such rows.
 - `raw_line` preserves the original log text, including trailing spaces, excluding only the record's LF/CRLF terminator. `line_no` is one-based within the original file.
 - Unexpected parsing failures retain the raw row in the CSV and record a reason in `parse_errors.jsonl`. They block database import. Invalid UTF-8 aborts preparation visibly. No line is silently skipped.
 - Four labelled VMs are kept separately for evaluation. Each has 28 raw UUID mentions but only 25 explicit instance tags, all in `abnormal`. Both counts are checked separately; `instance_id` keeps its agreed meaning. Labels are not exposed to the agent as ground-truth hints.
