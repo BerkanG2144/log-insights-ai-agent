@@ -76,7 +76,7 @@ The same log data matter differently to different people. An engineer needs the 
 - Filter values are checked against the data: wrong case is corrected and reported, unknown values return `not_checkable` with suggestions instead of an empty result.
 
 **4) An evidence record for every result**
-- Each tool result contains a `query_id`, the executed SQL, the parameters, the scope, the number of matching and returned rows, whether the result was truncated, and a status (`ok`, `empty`, `not_checkable`).
+- Analysis results report a `query_id`, SQL exposed by the tool, input parameters, scope, matching and returned counts, truncation, and a status (`ok`, `empty`, `not_checkable`). This evidence is not a complete trace of all internal SQL or its actual bindings.
 
 **5) Three roles, one agent**
 - Engineer, team lead and manager use the same tools and data. Role prompts decide which evidence is collected and how the answer and the recommendation look.
@@ -381,7 +381,7 @@ Ask a question in a role with the role prompts. They appear as slash commands in
 
 Tips:
 
-- Add `Include the exact SQL of every query in the evidence list.` to see the full SQL in the answer.
+- Add `Include the exact SQL of every query in the evidence list.` to request the SQL exposed by the tools in the answer. Internal helper queries and complete SQL bindings are not all exposed.
 - Use `/clear` between unrelated questions. Query ids (`Q1`, `Q2`, …) keep counting until Claude Code is restarted, so restart it if a fresh run should start at `Q1`.
 - `/export <file>` saves a conversation as a text file.
 - Claude Code may load the tool definitions only when they are first needed. In our clean-checkout test the first few tool calls of a session were sent before that and failed; the model then loaded the definitions and repeated the calls on its own. These failed calls do not reach the database and do not get a query id.
@@ -458,9 +458,9 @@ The manager classification is an agreed heuristic, not a validated risk model: d
 
 ## Worked investigation
 
-See [docs/worked_investigation.md](docs/worked_investigation.md): the same question about **APPREAD alerts in BGL** answered by all three roles, with the tool calls, executed queries, results, answers and recommended actions, and what the data do and do not establish.
+See [docs/worked_investigation.md](docs/worked_investigation.md): one investigation from the whole corpus down to a single burst. The manager compares problems across BGL and OpenStack, the team lead measures which FATAL problems in BGL recur, and the engineer uses a time-filtered full-text search and nearby events to examine the APPREAD burst of 2005-06-16. Recorded tool calls, reported SQL, inputs and result counts are documented, with the original final answers in [docs/investigation_runs/](docs/investigation_runs/). Full session streams and machine-readable follow-up evidence are retained locally. The published evidence does not contain every internal SQL query or all actual bindings.
 
-<!-- TODO: 2–3 sentence summary of the result once the investigation is final. -->
+Result in short: APPSEV and KERNMNTF are the recurring BGL problems to assign first, while KERNDTLB and KERNSTOR are dominated by bursts in June 2005. On 2005-06-16, APPREAD accounts for 2,040 log lines across 510 nodes in minute buckets from 14:50 to 15:03. Two failed job-login messages (`chdir … No such file or directory`) immediately precede the inspected first APPREAD line; a causal link is a hypothesis, not proven. The inspected samples share an error pattern and target host; this was not verified for every line. A separate [follow-up check](docs/investigation_runs/appread_followup_berkan.md) also found two chdir failures immediately before the inspected first APPREAD line on June 4, supporting the hypothesis without proving causation.
 
 
 ---
