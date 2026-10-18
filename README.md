@@ -22,7 +22,7 @@ The data are two public research log collections from [Loghub](https://github.co
 
 ## Demo-Video
 
-You can watch the demo on YouTube: click [here](https://youtu.be/TODO) <!-- TODO: replace with the video link -->
+You can watch the demo on YouTube: click [here](https://youtu.be/s8bCgkEh-b8)
 
 The presentation slides are in [docs/slides.pdf](docs/slides.pdf).
 
