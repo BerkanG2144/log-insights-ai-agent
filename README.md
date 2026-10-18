@@ -24,6 +24,8 @@ The data are two public research log collections from [Loghub](https://github.co
 
 You can watch the demo on YouTube: click [here](https://youtu.be/TODO) <!-- TODO: replace with the video link -->
 
+The presentation slides are in [docs/slides.pdf](docs/slides.pdf).
+
 <!-- Optional screenshots (e.g. the same question answered by the three roles in Claude Code):
 <p align="center">
   <img src="docs/images/engineer.png"  alt="Engineer answer"  width="32%">
@@ -137,10 +139,13 @@ The same log data matter differently to different people. An engineer needs the 
 - **`docs/`**
   - `schema.md` – shared data and tool contract
   - `worked_investigation.md` – one investigation of a real pattern, step by step for all three roles
+  - `investigation_runs/` – the original final answers of the three role runs and a follow-up check
+  - `slides.pdf` – presentation slides
 - **`tests/`**
   - `test_loader.py`, `test_loader_db.py` – loader tests (parser, CSV, database import)
   - `test_server.py` – server checks: filter resolution, `describe_dataset`, tool annotations (partly without database)
   - `test_search_phrase.py` – phrase search checks against the full data
+  - `test_literal_substring.py` – checks that `%` and `_` in the substring filter of `count_by`/`trend` are matched literally
   - `check_trend_stats.py` – compares the trend statistics of the server with reference values
 - **`.env.example`** – template for the database connection settings
 - **`requirements.txt`** – Python dependencies
