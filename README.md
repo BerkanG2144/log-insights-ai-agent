@@ -196,9 +196,31 @@ Copy-Item .env.example .env
 
 `.env` holds the five `SERENEDB_*` connection values. The defaults match the Docker command in step 4 (user `postgres`, password `hackathon`, host `127.0.0.1`, port `7890`). Use `127.0.0.1`, not `localhost` (some systems resolve `localhost` to IPv6 first). The loader and the server find `.env` relative to the repository, regardless of the calling directory. `.env` and `data/` are ignored by Git.
 
-### 3) Place the datasets
+### 3) Download and place the datasets
 
-Extract the original archives to these paths:
+Download the original archives from Zenodo (keep `?download=1` and `-L`) and extract them into `data/full/`:
+
+**Linux / macOS**
+
+```bash
+mkdir -p data/full/BGL data/full/OpenStack
+curl -L -o data/full/BGL.zip "https://zenodo.org/records/8196385/files/BGL.zip?download=1"
+unzip data/full/BGL.zip -d data/full/BGL
+curl -L -o data/full/OpenStack.tar.gz "https://zenodo.org/records/8196385/files/OpenStack.tar.gz?download=1"
+tar -xzf data/full/OpenStack.tar.gz -C data/full/OpenStack
+```
+
+**Windows (PowerShell)** (use `curl.exe`, not `curl`; `tar` is built into Windows 10/11)
+
+```powershell
+New-Item -ItemType Directory -Force data\full\BGL, data\full\OpenStack | Out-Null
+curl.exe -L -o data\full\BGL.zip "https://zenodo.org/records/8196385/files/BGL.zip?download=1"
+Expand-Archive data\full\BGL.zip -DestinationPath data\full\BGL
+curl.exe -L -o data\full\OpenStack.tar.gz "https://zenodo.org/records/8196385/files/OpenStack.tar.gz?download=1"
+tar -xzf data\full\OpenStack.tar.gz -C data\full\OpenStack
+```
+
+The archives are about 55 MB (BGL) and 5 MB (OpenStack); BGL unpacks to about 740 MB. Afterwards these files must exist:
 
 ```text
 data/full/BGL/BGL.log
@@ -241,7 +263,7 @@ New-Item -ItemType Directory -Force data | Out-Null
 docker run -d --name serenedb -p 127.0.0.1:7890:7890 -e POSTGRES_PASSWORD=hackathon -v serenedb-data:/var/lib/serenedb -v "${PWD}\data:/data" serenedb/serenedb:latest
 ```
 
-If the container already exists with this mount, use `docker start serenedb` instead (with Docker Desktop on Linux possibly `docker --context desktop-linux start serenedb`). If you use a different password, change `SERENEDB_PASSWORD` in `.env`. The mounted host directory must be the same directory passed to `--data-dir` (default: this project's `data/`). `latest` may change; the verified runtime version is recorded in the validation report.
+If another container named `serenedb` or another service already uses port 7890, stop it first (`docker stop <name>`). If the container already exists with this mount, use `docker start serenedb` instead (with Docker Desktop on Linux possibly `docker --context desktop-linux start serenedb`). If you use a different password, change `SERENEDB_PASSWORD` in `.env`. The mounted host directory must be the same directory passed to `--data-dir` (default: this project's `data/`). `latest` may change; the verified runtime version is recorded in the validation report.
 
 ### 5) Import and validate the data
 
@@ -250,7 +272,7 @@ python -m loader.db
 python -m loader.load
 ```
 
-The first command is a connection check and should print `(1,)`. The second streams the input into CSVs, verifies SHA-256 fingerprints, creates and loads the four tables in one transaction, validates the complete corpus and then builds the search indexes. A successful run ends with:
+The first command is a connection check and should print `(1,)`. The second streams the input into CSVs, verifies SHA-256 fingerprints, creates and loads the four tables in one transaction, validates the complete corpus and then builds the search indexes. On a laptop this took about 2 minutes. A successful run ends with:
 
 ```text
 Success: 54 SQL checks passed.
@@ -348,7 +370,7 @@ Claude Code starts the MCP server itself in the background. After changing serve
 
 ## How to use the agent
 
-Ask a question in a role with the role prompts. They appear as slash commands in Claude Code; type the question after the command:
+Ask a question in a role with the role prompts. They appear as slash commands in Claude Code (in the command picker shown as `/log-insights:engineer`, `/log-insights:team_lead`, `/log-insights:manager`; inserted as `/mcp__log-insights__engineer` etc.). Type the question after the command:
 
 ```text
 /mcp__log-insights__engineer What is going on with APPREAD alerts in BGL?
@@ -362,6 +384,7 @@ Tips:
 - Add `Include the exact SQL of every query in the evidence list.` to see the full SQL in the answer.
 - Use `/clear` between unrelated questions. Query ids (`Q1`, `Q2`, …) keep counting until Claude Code is restarted, so restart it if a fresh run should start at `Q1`.
 - `/export <file>` saves a conversation as a text file.
+- Claude Code may load the tool definitions only when they are first needed. In our clean-checkout test the first few tool calls of a session were sent before that and failed; the model then loaded the definitions and repeated the calls on its own. These failed calls do not reach the database and do not get a query id.
 - Tested with Claude Sonnet 5.5 (effort medium) and Claude Opus 5.5 in Claude Code 2.1.302 on Windows and Linux.
 
 
