@@ -153,7 +153,7 @@ To run the project locally you need:
 
 - **Python 3.12 or newer** ([Download](https://www.python.org/downloads/)) – tested with 3.12 on Linux and 3.13 on Windows
 - **Docker** (Docker Desktop on Windows/macOS) ([Download](https://docs.docker.com/get-docker/))
-- **Claude Code** ([Docs](https://docs.claude.com/en/docs/claude-code/overview)) – any MCP client that can start a stdio server works the same way
+- **Claude Code** ([Docs](https://code.claude.com/docs/en/setup)) with a paid Claude plan (Pro, Max, Team or Enterprise) or a Console account; installation is shown in step 6. Any MCP client that can start a stdio server works the same way
 - The **raw BGL and OpenStack datasets** (full versions, not the 2,000-line samples):
   [BGL](https://zenodo.org/records/8196385/files/BGL.zip?download=1), [OpenStack](https://zenodo.org/records/8196385/files/OpenStack.tar.gz?download=1)
 - Enough disk space for the raw files, the prepared CSVs, the database tables and the indexes
@@ -218,7 +218,7 @@ The loader checks these files itself. An earlier local `normal1` copy contained 
 
 ### 4) Start SereneDB (Docker)
 
-Make sure Docker is running. For a **new** container, run this from the repository root. It sets the password used in `.env.example` and mounts the project's `data/` folder at `/data`, so SereneDB can read the prepared files:
+Make sure Docker is running (Docker Desktop: wait until it shows "Engine running"). For a **new** container, run this from the repository root. It sets the password used in `.env.example` and mounts the project's `data/` folder at `/data`, so SereneDB can read the prepared files:
 
 **Linux / macOS**
 
@@ -281,9 +281,25 @@ python tests/check_trend_stats.py
 
 It should print `all checks passed`.
 
-### 6) Register the MCP server in Claude Code
+### 6) Install Claude Code and register the MCP server
 
-Register it once, from the repository root, with the Python interpreter that has the requirements installed:
+If Claude Code is not installed yet ([official setup guide](https://code.claude.com/docs/en/setup)):
+
+**Linux / macOS**
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://claude.ai/install.ps1 | iex
+```
+
+Open a new terminal and check with `claude --version`. If `claude` is not found, the install folder is not on your PATH yet (see the setup guide). On the first start, `claude` asks you to log in in the browser (choose your Claude account with subscription) and whether you trust the project folder (choose "Yes").
+
+Then register our MCP server once, from the repository root, with the Python interpreter that has the requirements installed:
 
 **Linux / macOS (with the `.venv` from step 2)**
 
