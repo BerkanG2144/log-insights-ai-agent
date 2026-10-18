@@ -4,6 +4,7 @@ Tables and tool contracts are defined in docs/schema.md.
 Run via Claude Code (stdio transport); never print to stdout.
 """
 
+import difflib
 import itertools
 import logging
 import os
@@ -15,6 +16,7 @@ from pathlib import Path
 import psycopg
 from dotenv import load_dotenv
 from mcp.server import MCPServer
+from mcp.types import ToolAnnotations
 from psycopg.rows import dict_row
 
 from roles import ENGINEER, MANAGER, SERVER_INSTRUCTIONS, TEAM_LEAD
@@ -54,6 +56,45 @@ DATASETS = {
 BUCKETS = {"minute", "hour", "day"}
 MAX_MESSAGE_CHARS = 500
 MAX_BUCKETS = 1000
+
+# Filters with a small set of valid values: checked against the data and listed by
+# describe_dataset. node, rack, instance_id etc. have too many values for that.
+VALUE_FILTERS = {
+    "bgl": ["level", "component", "team", "label"],
+    "openstack": ["level", "component", "team"],
+}
+
+# Documented facts (docs/schema.md, README), kept apart from measured values.
+TEAM_NOTE = ("team comes from the team_ownership table, a fictional mapping made for this "
+             "project; it does not describe real organisational responsibility.")
+TEXT_NOTE = ("text: search_logs matches words via the full-text index (phrase=true: adjacent "
+             "ordered tokens); count_by and trend match a case-insensitive substring.")
+NOTES = {
+    "bgl": {
+        "source": "BlueGene/L supercomputer logs (Loghub), complete file BGL.log.",
+        "label": "Alert category from the first field of each line; '-' means a line "
+                 "without an alert label. Only bgl has labels.",
+        "level": "Severity as written in the log.",
+        "team": TEAM_NOTE,
+        "text": TEXT_NOTE,
+        "not_listed": "node and rack have too many values to list; use count_by "
+                      "group_by='node' or 'rack'. node also works in nearby_events.",
+    },
+    "openstack": {
+        "source": "OpenStack Nova logs (Loghub), complete files normal1, normal2 and "
+                  "abnormal; the three files are separate recordings (source_file).",
+        "label": "Not available for openstack.",
+        "level": "Severity as written in the log.",
+        "team": TEAM_NOTE,
+        "text": TEXT_NOTE,
+        "not_listed": "service, http_status, instance_id and source_file are available "
+                      "via count_by; request_id and instance_id also in nearby_events.",
+    },
+}
+
+# Every tool only reads. Idempotence describes side effects, not result equality.
+READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False,
+                            idempotent_hint=True, open_world_hint=False)
 
 _query_ids = itertools.count(1)
 
@@ -120,6 +161,12 @@ def evidence(tool: str, dataset: str, params: dict, sql: str, scope: str,
     }
 
 
+def add_normalized(result_evidence: dict, normalized: dict) -> None:
+    """Show filter values whose spelling was corrected (params keep the input)."""
+    if normalized:
+        result_evidence["normalized_filters"] = normalized
+
+
 def not_checkable(tool: str, dataset: str, params: dict, reason: str,
                   sql: str | None = None) -> dict:
     return {
@@ -181,8 +228,8 @@ def build_where(dataset: str, text=None, component=None, level=None, team=None,
         scope.append(f"component = {component}")
     if level:
         clauses.append("t.level = %(level)s")
-        params["level"] = level.upper()
-        scope.append(f"level = {level.upper()}")
+        params["level"] = level
+        scope.append(f"level = {level}")
     if team:
         clauses.append("o.team = %(team)s")
         params["team"] = team
@@ -219,6 +266,52 @@ def check_label(dataset: str, label: str | None) -> str | None:
     return None
 
 
+class FilterError(ValueError):
+    """A filter value that does not occur in the dataset."""
+
+
+def known_values(dataset: str, name: str) -> list[str]:
+    """All stored values of one filter in VALUE_FILTERS (NULL excluded)."""
+    if name == "team":
+        sql = "SELECT DISTINCT team AS v FROM team_ownership WHERE dataset = %(dataset)s"
+        rows = run_query(sql, {"dataset": dataset})
+    else:
+        # name comes from VALUE_FILTERS, so it is safe to inline.
+        table = DATASETS[dataset]["table"]
+        rows = run_query(f"SELECT DISTINCT {name} AS v FROM {table} WHERE {name} IS NOT NULL")
+    return sorted(row["v"] for row in rows if row["v"] is not None)
+
+
+def resolve_filters(dataset: str, **filters) -> tuple[dict, dict]:
+    """Map filter values to their stored spelling.
+
+    Returns (resolved values, normalized) where normalized records every value that
+    was changed (e.g. label 'appread' -> 'APPREAD'). A value that matches nothing,
+    even ignoring case, raises FilterError with suggestions instead of returning an
+    empty result that looks like "zero lines".
+    """
+    resolved, normalized = {}, {}
+    for name, value in filters.items():
+        resolved[name] = value
+        if not value:
+            continue
+        values = known_values(dataset, name)
+        if value in values:
+            continue
+        same = [v for v in values if v.lower() == value.lower()]
+        if len(same) == 1:
+            resolved[name] = same[0]
+            normalized[name] = f"{value} -> {same[0]}"
+            continue
+        by_lower = {v.lower(): v for v in values}
+        close = difflib.get_close_matches(value.lower(), list(by_lower), n=3, cutoff=0.6)
+        hint = (f"did you mean: {', '.join(by_lower[c] for c in close)}" if close
+                else f"valid values: {', '.join(values)}")
+        raise FilterError(f"unknown {name} '{value}' in {dataset}; {hint} "
+                          "(describe_dataset lists all values)")
+    return resolved, normalized
+
+
 def clamp(value: int | None, default: int, maximum: int) -> int:
     if value is None or value < 1:
         return default
@@ -233,7 +326,7 @@ def select_columns(dataset: str) -> str:
 # Tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(title="Check database connection", annotations=READ_ONLY)
 def ping() -> dict:
     """Check that the MCP server can reach SereneDB. Returns {"ok": true} on success."""
     sql = "SELECT 1 AS ok"
@@ -245,7 +338,57 @@ def ping() -> dict:
         return {"ok": False, "sql": sql, "error": str(exc)}
 
 
-@mcp.tool()
+@mcp.tool(title="Describe a dataset", annotations=READ_ONLY)
+def describe_dataset(dataset: str) -> dict:
+    """Overview of one dataset: size, time range and the valid filter values.
+
+    Call this first when you are unsure which filter values exist or how they are
+    spelled. dataset: "bgl" or "openstack".
+    Returns in results (measured in the database): rows, first_ts, last_ts,
+    null_timestamp_rows, the values of level, component, team and (bgl only) label
+    with their line counts. metadata holds the configured group_by options of
+    count_by; these are capabilities, not database measurements.
+    notes holds documented explanations (meaning of fields, fictional teams); they
+    are project documentation, not measurements.
+    Use the other tools for the actual investigation.
+    """
+    params = {}
+    if (err := check_dataset(dataset)):
+        return not_checkable("describe_dataset", dataset, params, err)
+    table = DATASETS[dataset]["table"]
+    frm = base_from(dataset)
+    qp = {"dataset": dataset}
+    total_sql = (f"SELECT COUNT(*) AS n, MIN(t.ts) AS first_ts, MAX(t.ts) AS last_ts, "
+                 f"COUNT(*) - COUNT(t.ts) AS null_ts {frm}")
+    # Filter names come from VALUE_FILTERS, so they are safe to inline.
+    value_sqls = {
+        name: (f"SELECT {'o.team' if name == 'team' else 't.' + name} AS value, "
+               f"COUNT(*) AS count {frm} GROUP BY 1 ORDER BY count DESC, value")
+        for name in VALUE_FILTERS[dataset]
+    }
+    try:
+        totals = run_query(total_sql, qp)[0]
+        values = {name: run_query(sql, qp) for name, sql in value_sqls.items()}
+    except Exception as exc:
+        log.exception("describe_dataset failed")
+        return not_checkable("describe_dataset", dataset, params, str(exc))
+    results = {
+        "rows": totals["n"],
+        "first_ts": to_json(totals["first_ts"]),
+        "last_ts": to_json(totals["last_ts"]),
+        "null_timestamp_rows": totals["null_ts"],
+        "values": {name: clean_rows(rows) for name, rows in values.items()},
+    }
+    sql = "; ".join([total_sql, *value_sqls.values()])
+    returned = sum(len(rows) for rows in values.values())
+    result_evidence = evidence("describe_dataset", dataset, params, sql,
+                               f"{table}, all rows", totals["n"], returned, None, False)
+    return {"results": results,
+            "metadata": {"count_by_group_by": list(DATASETS[dataset]["group_by"])},
+            "notes": NOTES[dataset], "evidence": result_evidence}
+
+
+@mcp.tool(title="Search log messages", annotations=READ_ONLY)
 def search_logs(dataset: str, text: str, component: str | None = None,
                 level: str | None = None, team: str | None = None,
                 from_ts: str | None = None, to_ts: str | None = None,
@@ -262,6 +405,8 @@ def search_logs(dataset: str, text: str, component: str | None = None,
     Optional filters: component, level (e.g. FATAL, ERROR), team (from the ownership
     table), from_ts / to_ts (ISO timestamps), label (bgl only: alert category such as
     APPREAD or KERNDTLB, "-" = no alert). limit: default 20, max 100.
+    component, level, team and label are matched ignoring case; an unknown value
+    returns not_checkable with suggestions (describe_dataset lists all values).
     Returns the most relevant matching rows plus an evidence record with the exact SQL,
     the total number of matches and whether the list was truncated.
     """
@@ -275,6 +420,10 @@ def search_logs(dataset: str, text: str, component: str | None = None,
     # The inverted index is queried by its own name (see loader/indexes.sql).
     idx = DATASETS[dataset]["table"] + "_message_idx"
     try:
+        filters, normalized = resolve_filters(dataset, component=component, level=level,
+                                              team=team, label=label)
+        component, level = filters["component"], filters["level"]
+        team, label = filters["team"], filters["label"]
         query_text = "phraseto_tsquery(%(text)s)" if phrase else "%(text)s"
         clauses = [f"{idx}.message @@ {query_text}"]
         qp: dict = {"text": text, "dataset": dataset}
@@ -286,8 +435,8 @@ def search_logs(dataset: str, text: str, component: str | None = None,
             scope.append(f"component = {component}")
         if level:
             clauses.append(f"{idx}.level = %(level)s")
-            qp["level"] = level.upper()
-            scope.append(f"level = {level.upper()}")
+            qp["level"] = level
+            scope.append(f"level = {level}")
         if team:
             clauses.append(f"{idx}.component IN (SELECT component FROM team_ownership "
                            "WHERE dataset = %(dataset)s AND team = %(team)s)")
@@ -322,17 +471,18 @@ def search_logs(dataset: str, text: str, component: str | None = None,
             for row in rows:
                 row["team"] = team_of.get(row.get("component"))
         scope = f"{idx} ({DATASETS[dataset]['table']}), " + ", ".join(scope)
+    except FilterError as exc:
+        return not_checkable("search_logs", dataset, params, str(exc))
     except Exception as exc:
         log.exception("search_logs failed")
         return not_checkable("search_logs", dataset, params, str(exc))
-    return {
-        "results": clean_rows(rows),
-        "evidence": evidence("search_logs", dataset, params, rows_sql, scope,
-                             matched, len(rows), limit, matched > len(rows)),
-    }
+    result_evidence = evidence("search_logs", dataset, params, rows_sql, scope,
+                               matched, len(rows), limit, matched > len(rows))
+    add_normalized(result_evidence, normalized)
+    return {"results": clean_rows(rows), "evidence": result_evidence}
 
 
-@mcp.tool()
+@mcp.tool(title="Show events around a line", annotations=READ_ONLY)
 def nearby_events(dataset: str, line_no: int | None = None,
                   source_file: str | None = None, ts: str | None = None,
                   window_seconds: int = 60, node: str | None = None,
@@ -433,7 +583,7 @@ def nearby_events(dataset: str, line_no: int | None = None,
     return {"results": clean_rows(rows), "evidence": result_evidence}
 
 
-@mcp.tool()
+@mcp.tool(title="Count log lines per group", annotations=READ_ONLY)
 def count_by(dataset: str, group_by: str, text: str | None = None,
              component: str | None = None, level: str | None = None,
              team: str | None = None, from_ts: str | None = None,
@@ -448,6 +598,8 @@ def count_by(dataset: str, group_by: str, text: str | None = None,
     instance_id, source_file.
     Filters: text (substring of the message), component, level, team, from_ts, to_ts,
     label (bgl only: alert category such as APPREAD, "-" = no alert).
+    component, level, team and label are matched ignoring case; an unknown value
+    returns not_checkable with suggestions (describe_dataset lists all values).
     limit: number of groups, default 20, max 100.
     Returns [{key, count}] plus evidence (rows_matched = all counted rows).
     """
@@ -465,8 +617,11 @@ def count_by(dataset: str, group_by: str, text: str | None = None,
     # group_by comes from the whitelist above, so it is safe to inline.
     key = "o.team" if group_by == "team" else f"t.{group_by}"
     try:
-        where, qp, scope = build_where(dataset, text, component, level, team, from_ts, to_ts,
-                                       extra={"label": label})
+        filters, normalized = resolve_filters(dataset, component=component, level=level,
+                                              team=team, label=label)
+        label = filters.pop("label")
+        where, qp, scope = build_where(dataset, text, from_ts=from_ts, to_ts=to_ts,
+                                       extra={"label": label}, **filters)
         frm = base_from(dataset)
         # COUNT(DISTINCT) ignores NULL, so add 1 if a NULL group exists.
         total_sql = (f"SELECT COUNT(*) AS n, COUNT(DISTINCT {key}) "
@@ -476,6 +631,8 @@ def count_by(dataset: str, group_by: str, text: str | None = None,
                     f"GROUP BY {key} ORDER BY count DESC LIMIT {limit}")
         totals = run_query(total_sql, qp)[0]
         rows = run_query(rows_sql, qp) if totals["n"] else []
+    except FilterError as exc:
+        return not_checkable("count_by", dataset, params, str(exc))
     except Exception as exc:
         log.exception("count_by failed")
         return not_checkable("count_by", dataset, params, str(exc))
@@ -484,10 +641,11 @@ def count_by(dataset: str, group_by: str, text: str | None = None,
     result_evidence = evidence("count_by", dataset, params, rows_sql, scope,
                                totals["n"], len(rows), limit, covered < totals["n"])
     result_evidence["groups_total"] = totals["groups"]
+    add_normalized(result_evidence, normalized)
     return {"results": clean_rows(rows), "evidence": result_evidence}
 
 
-@mcp.tool()
+@mcp.tool(title="Count log lines over time", annotations=READ_ONLY)
 def trend(dataset: str, bucket: str = "hour", text: str | None = None,
           component: str | None = None, level: str | None = None,
           team: str | None = None, from_ts: str | None = None,
@@ -497,6 +655,8 @@ def trend(dataset: str, bucket: str = "hour", text: str | None = None,
     bucket: "minute", "hour" or "day". Use from_ts / to_ts to zoom in before using
     "minute". Filters: text (substring of the message), component, level, team, label
     (bgl only: alert category such as APPREAD, "-" = no alert).
+    component, level, team and label are matched ignoring case; an unknown value
+    returns not_checkable with suggestions (describe_dataset lists all values).
     Returns [{bucket_start, count}] in time order (max 1000 buckets) plus evidence.
     Buckets with zero lines are not listed.
     The evidence also holds summary fields computed in the database over ALL filtered
@@ -513,8 +673,11 @@ def trend(dataset: str, bucket: str = "hour", text: str | None = None,
         return not_checkable("trend", dataset, params,
                              f"bucket must be one of: {', '.join(sorted(BUCKETS))}")
     try:
-        where, qp, scope = build_where(dataset, text, component, level, team, from_ts, to_ts,
-                                       extra={"label": label})
+        filters, normalized = resolve_filters(dataset, component=component, level=level,
+                                              team=team, label=label)
+        label = filters.pop("label")
+        where, qp, scope = build_where(dataset, text, from_ts=from_ts, to_ts=to_ts,
+                                       extra={"label": label}, **filters)
         frm = base_from(dataset)
         # bucket comes from the whitelist above, so it is safe to inline.
         bucket_expr = f"date_trunc('{bucket}', t.ts)"
@@ -527,6 +690,8 @@ def trend(dataset: str, bucket: str = "hour", text: str | None = None,
         totals = run_query(total_sql, qp)[0]
         rows = run_query(rows_sql, qp) if totals["n"] else []
         stats = trend_stats(frm, where, qp, bucket_expr, totals["n"])
+    except FilterError as exc:
+        return not_checkable("trend", dataset, params, str(exc))
     except Exception as exc:
         log.exception("trend failed")
         return not_checkable("trend", dataset, params, str(exc))
@@ -535,6 +700,7 @@ def trend(dataset: str, bucket: str = "hour", text: str | None = None,
                                len(rows), MAX_BUCKETS, covered < totals["n"])
     result_evidence["buckets_total"] = totals["buckets"]
     result_evidence.update({k: to_json(v) for k, v in stats.items()})
+    add_normalized(result_evidence, normalized)
     return {"results": clean_rows(rows), "evidence": result_evidence}
 
 

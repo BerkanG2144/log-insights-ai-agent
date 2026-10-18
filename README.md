@@ -70,9 +70,10 @@ The same log data matter differently to different people. An engineer needs the 
 - Full-text search with `@@` on SereneDB's inverted index, ranked by BM25, optionally as phrase search.
 - Exact counts and time trends over all rows with SQL aggregations (`COUNT`, `GROUP BY`, `date_trunc`).
 
-**3) Five MCP tools instead of free SQL**
-- `search_logs`, `nearby_events`, `count_by`, `trend`, `ping`.
+**3) Six read-only MCP tools instead of free SQL**
+- `describe_dataset`, `search_logs`, `nearby_events`, `count_by`, `trend`, `ping`, all marked read-only via MCP tool annotations.
 - Inputs are SQL parameters; column names and time buckets come from fixed whitelists.
+- Filter values are checked against the data: wrong case is corrected and reported, unknown values return `not_checkable` with suggestions instead of an empty result.
 
 **4) An evidence record for every result**
 - Each tool result contains a `query_id`, the executed SQL, the parameters, the scope, the number of matching and returned rows, whether the result was truncated, and a status (`ok`, `empty`, `not_checkable`).
@@ -122,7 +123,7 @@ The same log data matter differently to different people. An engineer needs the 
 ## Folder and file structure
 
 - **`server/`** – the MCP server
-  - `server.py` – the five tools, input checks, SQL building, evidence record, role prompts as MCP prompts
+  - `server.py` – the six tools, input checks, SQL building, evidence record, role prompts as MCP prompts
   - `roles.py` – shared evidence rules (sent to the agent on connect) and the engineer, team lead and manager prompts
 - **`loader/`** – import and validation of the log data
   - `load.py` – main entry point: prepares CSVs, imports the four tables in one transaction, validates, builds indexes
@@ -138,6 +139,7 @@ The same log data matter differently to different people. An engineer needs the 
   - `worked_investigation.md` – one investigation of a real pattern, step by step for all three roles
 - **`tests/`**
   - `test_loader.py`, `test_loader_db.py` – loader tests (parser, CSV, database import)
+  - `test_server.py` – server checks: filter resolution, `describe_dataset`, tool annotations (partly without database)
   - `test_search_phrase.py` – phrase search checks against the full data
   - `check_trend_stats.py` – compares the trend statistics of the server with reference values
 - **`.env.example`** – template for the database connection settings
@@ -321,7 +323,7 @@ claude mcp add --transport http serenedb-docs https://api.serenedb.com/mcp
 
 ### 7) Start the agent
 
-Start `claude` in the repository folder and type `/mcp`: `log-insights` should be connected with **5 tools**.
+Start `claude` in the repository folder and type `/mcp`: `log-insights` should be connected with **6 tools**.
 
 Quick test:
 
@@ -367,15 +369,18 @@ Tips:
 
 ## Tools and evidence record
 
-All tools take `dataset` = `bgl` or `openstack`. Values are passed as SQL parameters; column names and buckets come from fixed whitelists. Every tool returns `{"results": [...], "evidence": {...}}`.
+All analysis tools take `dataset` = `bgl` or `openstack`. Values are passed as SQL parameters; column names and buckets come from fixed whitelists. Analysis tools return `results` and `evidence`; `describe_dataset` uses an overview object for `results` and adds `metadata` and `notes`. `ping` is a separate health check returning `ok`.
 
 | Tool | Purpose | Main inputs | Returns |
 | --- | --- | --- | --- |
+| `describe_dataset` | Overview of one dataset, to pick valid filters | – | Measured `results`: `rows`, `first_ts`, `last_ts`, `null_timestamp_rows`, all values of `level`, `component`, `team` and `label` (bgl) with line counts. `metadata.count_by_group_by`: configured grouping options. Separate `notes`: documented meanings (e.g. `-` = no alert, fictional teams) |
 | `search_logs` | Full-text search over the log message via the inverted index (`@@`), ranked by BM25 | `text`; optional `phrase` (default false; adjacent ordered tokens), `component`, `level`, `team`, `from_ts`, `to_ts`, `label` (bgl), `limit` (default 20, max 100) | Matching rows with `score` and `team`; total matches in `rows_matched` |
 | `nearby_events` | Lines just before and after one anchor line, in time order | `line_no` (+ `source_file` for openstack) or `ts`; `window_seconds` (default 60, max 3600); optional `node` (bgl) or `request_id` / `instance_id` (openstack); `limit` (default 50, max 200) | Half of the limit before and half after the anchor, each with `offset_s`; OpenStack stays in the anchor's file |
 | `count_by` | Counts per group over the complete filtered data, largest first | `group_by` (bgl: component, level, team, label, node, rack; openstack: component, level, team, service, http_status, instance_id, source_file); structured filters as in `search_logs` (`text` = substring; no `phrase` option); `limit` (default 20, max 100) | `[{key, count}]`, `groups_total` |
 | `trend` | Counts per time bucket over the complete filtered data | `bucket` (`minute`, `hour`, `day`); same filters as `count_by` | `[{bucket_start, count}]` (max 1,000 buckets) plus summary fields computed in the database: `active_buckets`, `first_bucket`, `last_bucket`, `peak_bucket`, `peak_count`, `peak_share`, `null_timestamp_rows` |
 | `ping` | Connection check | – | `{"ok": true}` |
+
+`component`, `level`, `team` and `label` are matched ignoring case. A corrected value is shown in the evidence as `normalized_filters` (e.g. `appread -> APPREAD`); `params` keep the input. A value that does not exist in the dataset returns `not_checkable` with suggestions (e.g. `unknown label 'APREAD' in bgl; did you mean: APPREAD, APPRES`), so a typo is never reported as zero lines.
 
 `team` is resolved through the fictional `team_ownership` table. Full details: [docs/schema.md](docs/schema.md).
 
@@ -461,7 +466,7 @@ python -m unittest discover -s tests -v
 Remove-Item Env:LOADER_DB_TESTS
 ```
 
-The database tests exercise CSV round-tripping, composite keys, NULLs, search refresh/BM25, duplicate-import refusal and replacement rollback. They create uniquely named `loader_test_*` schemas and remove them afterwards; they do not change the application's tables. `test_search_phrase.py` reads the imported tables and checks the phrase search reference values.
+The database tests exercise CSV round-tripping, composite keys, NULLs, search refresh/BM25, duplicate-import refusal and replacement rollback. They create uniquely named `loader_test_*` schemas and remove them afterwards; they do not change the application's tables. `test_search_phrase.py` and the full-corpus part of `test_server.py` read the imported tables and check reference values (phrase search, `describe_dataset`, filter resolution).
 
 **Trend statistics of the server** (read-only, full corpus):
 

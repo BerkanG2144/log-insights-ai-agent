@@ -42,6 +42,10 @@ tools of this server. Rules for every answer:
    without choosing another peak. If null_timestamp_rows > 0, state that number and do
    not treat those lines as observations at a time. Do not confuse the last bucket of
    one problem with the last day of the whole dataset.
+14. If you are unsure which filter values exist or how they are spelled, call
+   describe_dataset first. An unknown filter value returns not_checkable with
+   suggestions: it means the value does not exist, not that zero lines matched.
+   If evidence shows normalized_filters, report the corrected value.
 """
 
 ENGINEER = """\
@@ -51,6 +55,7 @@ Question: {question}
 Goal: what failed, in which component, and what happened just before and after.
 
 Suggested tool flow:
+0. describe_dataset if the component, level or label names are not known yet.
 1. search_logs with the key error text (and a time filter if known) to find the
    failing lines. For a known multi-word message, use phrase=true to match adjacent
    tokens in order. Prefer level FATAL/ERROR/SEVERE/FAILURE.
@@ -80,6 +85,7 @@ Goal: which problems recur, how often, and which components or teams are involve
 over a stated period.
 
 Suggested tool flow:
+0. describe_dataset for the period covered and the valid levels, labels and teams.
 1. count_by over the whole dataset (or the stated period) grouped by team, then by
    component or label, filtered to problem levels (e.g. FATAL, ERROR).
 2. For EVERY problem you discuss, call trend with that problem's own filter

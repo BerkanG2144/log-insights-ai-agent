@@ -140,7 +140,7 @@ CREATE INDEX openstack_logs_message_idx ON openstack_logs USING inverted (
 
 Commit index creation before running `VACUUM (REFRESH_TABLE) bgl_logs` and the equivalent for OpenStack. Full-text queries use the index name, e.g. `SELECT line_no FROM bgl_logs_message_idx WHERE message @@ 'ciod'`. The indexed and included columns expose all log-table fields. SQL aggregation can use the base tables. Ground-truth anomaly labels are not indexed or exposed as agent tools.
 
-## Evidence record (returned by every tool)
+## Evidence record (returned by every analysis tool; ping is a health check)
 
 ```json
 {
@@ -164,12 +164,26 @@ Commit index creation before running `VACUUM (REFRESH_TABLE) bgl_logs` and the e
 `status` is `ok`, `empty` or `not_checkable`. `not_checkable` always comes with `reason` (for example "no instance_id in these rows"). `truncated` is `true` whenever `rows_matched > rows_returned` (for aggregations: groups cut by `limit`).
 `sql` is the exact statement; values are passed as parameters, never string-built.
 
+`describe_dataset` returns a composite overview. Its `rows_matched` is the number
+of source log lines, while `rows_returned` is the sum of entries in the returned
+filter-value lists (level, component, team and, for BGL, label). A source line
+contributes to several lists; these two fields therefore do not count the same
+kind of row. No list is limited, so `limit` is null and `truncated` is false even
+when `rows_matched` is much larger than `rows_returned`. `sql` contains all executed
+measurement statements in order, separated by semicolons; their dataset binding
+is the `dataset` field of the evidence record. NULL groups represent missing
+values, not filter strings. `results` contains measurements; `metadata` contains
+configured capabilities (`count_by_group_by`); `notes` contains documented field
+meanings and limitations. Nothing is cached: every successful call performs new
+measurements and receives a new query ID.
+
 ## Tools (names as in the team rules)
 
 All tools take `dataset` = `bgl` | `openstack`. Optional filters are AND-combined.
 
 | tool | inputs | returns |
 |---|---|---|
+| `describe_dataset` | `dataset` | `results`: rows, time range, values of `level`, `component`, `team`, `label` (bgl) with counts; `metadata`: configured grouping options; `notes`: documented explanations; evidence |
 | `search_logs` | `dataset`, `text`, optional `component`, `level`, `team`, `from_ts`, `to_ts`, `label` (bgl only), `limit` (default 20, max 100), `phrase` (default false) | matching rows + evidence |
 | `nearby_events` | `dataset`, `line_no` (+ `source_file` for OpenStack) or `ts`, `window_seconds` (default 60, max 3600), optional `node` or `request_id` / `instance_id`, `limit` (default 50, max 200) | rows around the anchor in time order + evidence |
 | `count_by` | `dataset`, `group_by`, optional `text`, `component`, `level`, `team`, `from_ts`, `to_ts`, `limit` (default 20, max 100) | counts per group, largest first + evidence |
@@ -177,6 +191,8 @@ All tools take `dataset` = `bgl` | `openstack`. Optional filters are AND-combine
 
 `group_by` whitelist (anything else → `not_checkable`): `component`, `level`, `team`, `label`, `node`, `rack`, `service`, `http_status`, `instance_id`, `source_file`.
 `team` is resolved by joining `team_ownership`.
+`component`, `level`, `team`, `label` are matched ignoring case (evidence `normalized_filters`); a value that does not exist → `not_checkable` with suggestions.
+All tools carry MCP annotations `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, `openWorldHint=false`.
 `check_hypothesis` comes later and reuses the same evidence record per check.
 
 ## Import check (reference counts, all checked against the files)
