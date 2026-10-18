@@ -193,7 +193,6 @@ All tools take `dataset` = `bgl` | `openstack`. Optional filters are AND-combine
 `team` is resolved by joining `team_ownership`.
 `component`, `level`, `team`, `label` are matched ignoring case (evidence `normalized_filters`); a value that does not exist → `not_checkable` with suggestions.
 All tools carry MCP annotations `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, `openWorldHint=false`.
-`check_hypothesis` comes later and reuses the same evidence record per check.
 
 ## Import check (reference counts, all checked against the files)
 

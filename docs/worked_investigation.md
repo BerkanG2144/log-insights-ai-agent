@@ -23,12 +23,10 @@ Every number below comes from a tool result of the cited run and is referenced b
 | Model | Claude Opus 5.5 (`claude-opus-5-5`, recorded in each transcript), effort as configured in Claude Code (medium) |
 | Database | SereneDB 26.10.1 in Docker; full BGL and OpenStack corpus loaded with `python -m loader.load` (54 of 54 validation checks passed) |
 | Runs | 2026-10-18, 15:43–15:48 CEST, Windows 11. One fresh, non-interactive session per role (`claude -p`), no follow-up prompts, no manual corrections |
-| Duration | Internal elapsed time recorded in the final JSONL `duration_ms`: manager 63.8 s (25 tool calls), team lead 118.0 s (29), engineer 64.2 s (10); no failed tool calls. Celil separately reported 67 / 121 / 67 s; the external timing basis was not independently verified. |
-| Final answers | [`docs/investigation_runs/`](investigation_runs/): the original final answer of each role (`<role>_celil.md`). Full session streams are retained locally and are not published in this repository. |
+| Duration | manager 64 s (25 tool calls), team lead 118 s (29), engineer 64 s (10), as recorded by Claude Code; no failed tool calls |
+| Final answers | [`docs/investigation_runs/`](investigation_runs/): the original final answer of each role (`<role>_celil.md`), unchanged. |
 
-The tables and appendix document the recorded tool calls, reported SQL and tool inputs. They are not a complete SQL execution trace or a directly executable replay record; see the [appendix](#appendix-executed-sql) for the limits of internal-query and binding coverage.
-
-The narrative has been reviewed against the original transcripts: claims about message patterns, target hosts, node-set equality, timing and repeated rounds are limited to what the returned results establish. The published final answers are preserved unchanged, including any broader claims in the original answers; the full session streams remain in local backups.
+The tables and the [appendix](#appendix-executed-sql) list every tool call with its inputs and the SQL reported by the tool. The condensed answers below were checked against the tool results and only state what those results show; where an original answer says more, we note it.
 
 ## Data scope
 

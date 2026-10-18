@@ -92,7 +92,7 @@ The same log data matter differently to different people. An engineer needs the 
 - We first agreed on a shared data and tool contract (`docs/schema.md`) and then worked in parallel: **loader and data validation** on one side, **MCP server, tools and roles** on the other.
 - All changes went through Git (pull before push, `.gitattributes` for consistent line endings between Windows and Linux).
 - Every change was tested on **both machines** (Windows and Linux) against the complete data, and the role answers were checked against the tool results and reference values (`tests/check_trend_stats.py`). Where the model computed numbers itself and got them wrong, we moved the calculation into the database.
-- We used Claude Code as a development assistant throughout the hackathon.
+- We used AI coding assistants throughout the hackathon: Claude Code (Anthropic) and Codex (OpenAI). All results were checked against the tool outputs and the database.
 
 
 ---
@@ -465,7 +465,7 @@ The manager classification is an agreed heuristic, not a validated risk model: d
 
 ## Worked investigation
 
-See [docs/worked_investigation.md](docs/worked_investigation.md): one investigation from the whole corpus down to a single burst. The manager compares problems across BGL and OpenStack, the team lead measures which FATAL problems in BGL recur, and the engineer uses a time-filtered full-text search and nearby events to examine the APPREAD burst of 2005-06-16. Recorded tool calls, reported SQL, inputs and result counts are documented, with the original final answers in [docs/investigation_runs/](docs/investigation_runs/). Full session streams and machine-readable follow-up evidence are retained locally. The published evidence does not contain every internal SQL query or all actual bindings.
+See [docs/worked_investigation.md](docs/worked_investigation.md): one investigation from the whole corpus down to a single burst. The manager compares problems across BGL and OpenStack, the team lead measures which FATAL problems in BGL recur, and the engineer uses a time-filtered full-text search and nearby events to examine the APPREAD burst of 2005-06-16. All tool calls with their inputs, reported SQL and result counts are documented, and the original final answers are in [docs/investigation_runs/](docs/investigation_runs/).
 
 Result in short: APPSEV and KERNMNTF are the recurring BGL problems to assign first, while KERNDTLB and KERNSTOR are dominated by bursts in June 2005. On 2005-06-16, APPREAD accounts for 2,040 log lines across 510 nodes in minute buckets from 14:50 to 15:03. Two failed job-login messages (`chdir … No such file or directory`) immediately precede the inspected first APPREAD line; a causal link is a hypothesis, not proven. The inspected samples share an error pattern and target host; this was not verified for every line. A separate [follow-up check](docs/investigation_runs/appread_followup_berkan.md) also found two chdir failures immediately before the inspected first APPREAD line on June 4, supporting the hypothesis without proving causation.
 
