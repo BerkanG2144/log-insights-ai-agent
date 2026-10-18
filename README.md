@@ -516,6 +516,7 @@ python tests/check_trend_stats.py
 - The team ownership mapping is fictional. Cost, downtime and customer impact are not in the logs and are never estimated.
 - Interpretations of alert labels and causes rest on the lines actually inspected and are marked as hypotheses.
 - Numbers come from the tools, but the wording and the labels the model assigns (e.g. the manager's burst/recurring/limited classification) can vary between runs and should be checked against the evidence fields.
+- SereneDB 26.10.1 occasionally crashed during our tests (container exit code 139, SIGSEGV), not tied to one reproducible query; the cause is unknown. If a tool suddenly returns a connection error, run `docker start serenedb` and restart Claude Code.
 - Not implemented (optional in the challenge): agent-managed indexes, huge remote datasets, traces/metrics, row-level security, fuzzy search.
 
 
