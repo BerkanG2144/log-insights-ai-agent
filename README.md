@@ -201,6 +201,8 @@ Copy-Item .env.example .env
 
 `.env` holds the five `SERENEDB_*` connection values. The defaults match the Docker command in step 4 (user `postgres`, password `hackathon`, host `127.0.0.1`, port `7890`). Use `127.0.0.1`, not `localhost` (some systems resolve `localhost` to IPv6 first). The loader and the server find `.env` relative to the repository, regardless of the calling directory. `.env` and `data/` are ignored by Git.
 
+**Using another SereneDB instance (e.g. the one provided by the organisers).** Put its host, port, user, password and database into the five `SERENEDB_*` values in `.env`; the server and the loader use nothing else. The loader imports the prepared CSV files with a server-side `COPY` from `/data`, so loading the data (step 5) needs a SereneDB that can read this project's `data/` folder, such as the local container from step 4. If the instance already contains the four tables loaded by this loader, skip steps 3 to 5 and only run `python -m loader.validate` as a check.
+
 ### 3) Download and place the datasets
 
 Download the original archives from Zenodo (keep `?download=1` and `-L`) and extract them into `data/full/`:
