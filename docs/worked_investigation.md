@@ -26,7 +26,7 @@ Every number below comes from a tool result of the cited run and is referenced b
 | Duration | Internal elapsed time recorded in the final JSONL `duration_ms`: manager 63.8 s (25 tool calls), team lead 118.0 s (29), engineer 64.2 s (10); no failed tool calls. Celil separately reported 67 / 121 / 67 s; the external timing basis was not independently verified. |
 | Final answers | [`docs/investigation_runs/`](investigation_runs/): the original final answer of each role (`<role>_celil.md`). Full session streams are retained locally and are not published in this repository. |
 
-Each question requests the exact SQL in its evidence list. The tables and appendix document the SQL exposed by each tool and the recorded tool inputs. This is not a complete execution trace: tools also execute internal count, trend-summary, filter-resolution and anchor queries that are not all included in `evidence.sql`. `evidence.params` records tool inputs, not a complete set of actual SQL bindings; normalized values, computed window bounds and anchor values may differ or be absent. The appendix alone is therefore not a directly executable replay record.
+The tables and appendix document the recorded tool calls, reported SQL and tool inputs. They are not a complete SQL execution trace or a directly executable replay record; see the [appendix](#appendix-executed-sql) for the limits of internal-query and binding coverage.
 
 The narrative has been reviewed against the original transcripts: claims about message patterns, target hosts, node-set equality, timing and repeated rounds are limited to what the returned results establish. The published final answers are preserved unchanged, including any broader claims in the original answers; the full session streams remain in local backups.
 
@@ -98,7 +98,8 @@ The detailed tables and [executed SQL](#manager) below support the brief; the [o
 
 **How the answer is built.** The role prompt fixes the candidate set so that repeated answers are comparable: the five largest BGL labels except `-`, and the two largest OpenStack components at ERROR and at WARNING. Every candidate gets its own day trend. It is then classified with a fixed, agreed heuristic (not a validated risk model): `burst` if `peak_share > 0.5`; otherwise `recurring` if active on at least 5 days, else `limited`. A dataset that spans fewer than 7 days is "recurrence not assessable". "Still active" means the last active day lies within the last 7 days of the dataset.
 
-**Tool calls**
+<details>
+<summary>Tool calls (25)</summary>
 
 | Query | Tool | Inputs (besides dataset) | Scope as reported | rows_matched | returned | truncated | status |
 |---|---|---|---|---|---|---|---|
@@ -127,6 +128,8 @@ The detailed tables and [executed SQL](#manager) below support the brief; the [o
 | Q23 | `count_by` | group_by="team", level="ERROR", limit=10 | openstack_logs, level = ERROR | 194 | 2 | false | ok |
 | Q24 | `count_by` | group_by="team", level="WARNING", limit=10 | openstack_logs, level = WARNING | 3,118 | 3 | false | ok |
 | Q25 | `search_logs` | text="error", label="APPSEV", limit=3 | bgl_logs_message_idx (bgl_logs), message matches 'error' (full-text), label = APPSEV | 49,651 | 3 | true | ok |
+
+</details>
 
 **Key results (Observed)**
 
@@ -175,7 +178,8 @@ Two small points in the run's wording, for transparency:
 /mcp__log-insights__team_lead Across the full BGL dataset, which FATAL problems recur, how often, and which components and teams should investigate first? Include the exact SQL of every query in the evidence list.
 ```
 
-**Tool calls**
+<details>
+<summary>Tool calls (29)</summary>
 
 | Query | Tool | Inputs (besides dataset) | Scope as reported | rows_matched | returned | truncated | status |
 |---|---|---|---|---|---|---|---|
@@ -208,6 +212,8 @@ Two small points in the run's wording, for transparency:
 | Q27 | `search_logs` | text="kernel terminated", level="FATAL", label="KERNTERM", limit=2 | bgl_logs_message_idx (bgl_logs), message matches 'kernel terminated' (full-text), level = FATAL, label = KERNTERM | 23,338 | 2 | true | ok |
 | Q28 | `search_logs` | text="ciod", level="FATAL", label="-", component="APP", limit=2 | bgl_logs_message_idx (bgl_logs), message matches 'ciod' (full-text), component = APP, level = FATAL, label = - | 164,551 | 2 | true | ok |
 | Q29 | `search_logs` | text="interrupt", level="FATAL", label="-", component="KERNEL", limit=2 | bgl_logs_message_idx (bgl_logs), message matches 'interrupt' (full-text), component = KERNEL, level = FATAL, label = - | 86,752 | 2 | true | ok |
+
+</details>
 
 **Answer (condensed from the run)**
 
