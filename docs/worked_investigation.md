@@ -11,7 +11,7 @@ Every number below comes from a tool result of the cited run and is referenced b
 ## Summary
 
 - **Manager:** among the fixed candidates, **APPSEV** (49,651 log lines on 67 active days, still active at the end of BGL) and **KERNMNTF** (31,531 lines, 25 days, still active) are the recurring problems to assign first. **KERNDTLB** and **KERNSTOR** are large but single bursts in June 2005 and get a one-off review. OpenStack covers only 3 days, so its recurrence is not assessable; its largest ERROR source is `oslo_service.periodic_task` (192 lines).
-- **Team lead:** 855,501 of 4,747,963 BGL lines are FATAL. 59.3 % of them carry no alert label; among labelled problems APPSEV is the most persistent and KERNDTLB is almost entirely one day on one rack (R30).
+- **Team lead:** 855,501 of 4,747,963 BGL lines are FATAL. 59.3 % of them carry no alert label; among the five labelled problems examined, APPSEV is the most persistent and KERNDTLB is almost entirely one day on one rack (R30).
 - **Engineer:** on 2005-06-16, 2,040 APPREAD lines match the full-text query, with 4 lines on each of 510 nodes in minute buckets from 14:50 to 15:03. The 20 search results inspected show the same error pattern and target host; this was not verified for every line. Just before the first APPREAD line, two `LOGIN chdir(...) failed: No such file or directory` lines appear. That is **consistent with** a job whose working directory was missing, **not proven**. The total count and number of nodes match 2005-06-04, as do the error pattern and host in the inspected samples; the timing differs. The full node sets were not compared.
 
 ## Run setup
@@ -23,7 +23,7 @@ Every number below comes from a tool result of the cited run and is referenced b
 | Model | Claude Opus 5.5 (`claude-opus-5-5`, recorded in each transcript), effort as configured in Claude Code (medium) |
 | Database | SereneDB 26.10.1 in Docker; full BGL and OpenStack corpus loaded with `python -m loader.load` (54 of 54 validation checks passed) |
 | Runs | 2026-10-18, 15:43–15:48 CEST, Windows 11. One fresh, non-interactive session per role (`claude -p`), no follow-up prompts, no manual corrections |
-| Duration | manager 67 s (25 tool calls), team lead 121 s (29), engineer 67 s (10); no failed tool calls |
+| Duration | Internal elapsed time recorded in the final JSONL `duration_ms`: manager 63.770 s (25 tool calls), team lead 118.028 s (29), engineer 64.213 s (10); no failed tool calls. Celil separately reported 67 / 121 / 67 s; the external timing basis was not independently verified. |
 | Final answers | [`docs/investigation_runs/`](investigation_runs/): the original final answer of each role (`<role>_celil.md`). Full session streams are retained locally and are not published in this repository. |
 
 Each question requests the exact SQL in its evidence list. The tables and appendix document the SQL exposed by each tool and the recorded tool inputs. This is not a complete execution trace: tools also execute internal count, trend-summary, filter-resolution and anchor queries that are not all included in `evidence.sql`. `evidence.params` records tool inputs, not a complete set of actual SQL bindings; normalized values, computed window bounds and anchor values may differ or be absent. The appendix alone is therefore not a directly executable replay record.
@@ -228,9 +228,9 @@ The other 31 FATAL labels add up to 27,653 lines (3.2 %, Q3); their trends were 
 
 *Pattern over time (Observed, each from the problem's own day trend).*
 
-- **KERNDTLB** (Q5): essentially one event. 152,182 lines (99.6 %) on 2005-06-11; almost all lines are on rack R30 (Q18).
+- **KERNDTLB** (Q5): 152,182 lines (99.6 % of its total) fall on 2005-06-11; almost all lines are on rack R30 (Q18). This concentration does not establish how many incidents occurred.
 - **KERNSTOR** (Q6): 63,488 lines on 2005-06-13/14 (peak 74.2 %), then one line each on three days in November. The burst falls on the same days as the unlabelled FATAL peak (2005-06-14: 295,244 lines, 58.2 % of that problem, Q10). Consistent with one shared event, **not proven**.
-- **APPSEV** (Q7): the most steadily recurring problem: 67 active days between 2005-07-20 and 2006-01-03 (not consecutive), peak only 7.0 % on 2005-11-26, heavier from mid-November to December, still present on 2006-01-03.
+- **APPSEV** (Q7): the most persistent of the five labelled problems examined (the other 31 FATAL labels were not trended): 67 active days between 2005-07-20 and 2006-01-03 (not consecutive), peak only 7.0 % on 2005-11-26, heavier from mid-November to December, still present on 2006-01-03.
 - **KERNMNTF** (Q8): an intense spell 2005-08-31 to 2005-09-13 (peak 2005-09-03, 4,352 lines, 13.8 %), then returning every few weeks until 2006-01-03.
 - **KERNTERM** (Q9): July to November (peak 2005-08-17, 3,967 lines, 17.0 %); several days count exactly 512, 1,024 or 2,048 lines; nothing after 2005-11-16.
 
@@ -242,11 +242,11 @@ One wording slip in the run: the answer says APPSEV appeared "on 67 days in a ro
 
 **Recommended actions for the team lead**
 
-1. **APPSEV, Application Runtime** first: most persistent (67 active days, no dominant day, 64 racks, still active on 2006-01-03).
+1. **APPSEV, Application Runtime** first: most persistent among the five labelled problems examined (67 active days, no dominant day, 64 racks, still active on 2006-01-03).
 2. **KERNMNTF, Compute Platform**: Lustre mount failures on 25 days across 64 racks, still active at the end.
-3. **The 2005-06-13/14 event, Compute Platform**: 295,244 unlabelled FATAL lines and 63,488 KERNSTOR lines on these two days. Next check: `nearby_events` around the first KERNSTOR line (line 382963, Q24).
+3. **The 2005-06-13/14 concentration, Compute Platform**: on these two days, 311,756 unlabelled FATAL lines (16,512 on 06-13 and 295,244 on 06-14, Q10) and 63,488 KERNSTOR lines (Q6). Next check: `nearby_events` around the first KERNSTOR line (line 382963, Q24).
 4. **KERNTERM, Compute Platform**: check whether a fix landed around 2005-11-16 and why rack R63 has 2,737 lines.
-5. **KERNDTLB**: treat it as one past event on R30 (2005-06-11), not as a recurring problem.
+5. **KERNDTLB**: review the historical concentration on R30 (2005-06-11); the line counts do not establish an incident count.
 
 ---
 
@@ -361,11 +361,11 @@ That the five label counts are identical with and without the FATAL filter shows
 
 ## Limitations of this investigation
 
-- **One run per role.** The numbers come from the database and are reproducible; the wording, the order of tool calls and the labels a model assigns can vary between runs. Section 1 checks the manager's labels against the rule; the two wording slips we found are noted in sections 1 and 2.
+- **One run per role.** The numbers come from the database and are reproducible; the wording, the order of tool calls and the labels a model assigns can vary between runs. Section 1 checks the manager's labels against the rule; wording issues are noted in sections 1 and 2. The original team-lead answer is preserved unchanged and still contains the two-day subtotal error corrected above.
 - **Inspected occurrences.** Before/after sequences are shown only for the occurrence inspected with `nearby_events`.
 - **Truncated lists.** Where a result is truncated, only the listed rows or groups were seen; totals remain complete.
 - **Word versus phrase search.** The engineer used word matching (`phrase=false`); for this message and label it matched all 2,040 lines of the day (Q3). `phrase=true` would require the tokens to be adjacent and in order.
-- **Database stability.** During development we observed sporadic SereneDB 26.10.1 crashes (SIGSEGV, exit 139), unrelated to a specific query. They did not occur during the runs shown here.
+- **Database stability.** During development we observed SereneDB 26.10.1 crashes (SIGSEGV, exit 139) during repeated search sequences, most recently in a later review while searching BGL for `ciod`. The cause is unknown and no fix is included. They did not occur during the runs shown here.
 
 ## Reproduce
 
