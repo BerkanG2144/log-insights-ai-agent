@@ -219,8 +219,8 @@ def build_where(dataset: str, text=None, component=None, level=None, team=None,
     if text:
         # Aggregation tools filter the base table by substring; search_logs uses the
         # full-text index instead. The scope text states which one was used.
-        clauses.append("LOWER(t.message) LIKE %(text)s")
-        params["text"] = f"%{text.lower()}%"
+        clauses.append("POSITION(%(text)s IN LOWER(t.message)) > 0")
+        params["text"] = text.lower()
         scope.append(f"message contains '{text}' (substring)")
     if component:
         clauses.append("t.component = %(component)s")
