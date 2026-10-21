@@ -1,15 +1,20 @@
 # Hackathon Project: Log Insights AI Agent
 
 This project was developed at the **National AI Hackathon 2026** (SchubKI) in a team of two students for the SereneDB challenge *"Making Sense of Logs – The Right Insights for the Right People"*.  
-It is an AI agent that answers questions about millions of system log lines and adapts the answer to the person asking: an **engineer**, a **team lead** or a **manager**. The agent (Claude in Claude Code) never reads raw log files. It calls tools of our own **MCP server**, which run parameterized SQL in **SereneDB**, and every number in an answer is backed by the query that produced it.
+It is an AI agent that answers questions about millions of system log lines and adapts the answer to the person asking: an **engineer**, a **team lead** or a **manager**. The agent (Claude in Claude Code) does not read raw log files. Instead, it calls the tools of our own **MCP server**, which run SQL queries in **SereneDB**, so every number in an answer comes from a real query.
 
 **The database searches and calculates; the agent explains.**
 
-<!-- Screenshot of the agent (add later):
+
+---
+
+## Screenshot of the Agent
+
+Team lead question in Claude Code: the agent calls the MCP tools and answers with measured numbers from SereneDB.
+
 <p align="center">
-  <img src="docs/images/agent.png" alt="Log Insights AI Agent in Claude Code" width="90%">
+  <img src="docs/images/agent.png" alt="Log Insights AI Agent answering a team lead question in Claude Code" width="100%">
 </p>
--->
 
 
 ---
@@ -51,7 +56,7 @@ Question ──► Claude Code ──► MCP server (server/server.py) ──►
 ### Key Features:
 
 **1) Complete data, validated**
-- Python loader imports the full BGL and OpenStack corpora, checks them with 54 SQL validations and builds full-text indexes
+- Python loader imports the full BGL and OpenStack datasets, checks them with 54 SQL validations and builds full-text indexes
 
 **2) Search and analytics in one database**
 - Full-text search on SereneDB's inverted index with BM25 ranking, optionally as phrase search
@@ -59,13 +64,13 @@ Question ──► Claude Code ──► MCP server (server/server.py) ──►
 
 **3) Six read-only MCP tools instead of free SQL**
 - `describe_dataset`, `search_logs`, `nearby_events`, `count_by`, `trend`, `ping`
-- All inputs are SQL parameters; columns and time buckets come from fixed whitelists
+- All inputs are passed as SQL parameters, columns and time buckets come from fixed whitelists
 
 **4) Evidence for every number**
 - Each tool result carries a query id, the SQL, the parameters, the data scope, row counts and a truncation flag
 
 **5) Three roles, one agent**
-- Engineer, team lead and manager use the same tools and data; role prompts decide which evidence is collected and what the recommendation looks like
+- Engineer, team lead and manager use the same tools and data, but each role prompt collects different evidence and gives a different kind of recommendation
 - Answers separate *observed facts*, *hypotheses*, *unknowns* and *recommendations*
 
 
