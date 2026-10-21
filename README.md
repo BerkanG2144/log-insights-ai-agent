@@ -124,7 +124,7 @@ We used AI coding assistants (Claude Code and Codex) throughout the hackathon.
 ### Documentation and testing (together with Berkan)
 - Data and tool contract, clean-checkout tests on Windows and Linux, worked investigation, README
 
-**Berkan Gürbüz** built the loader, data validation, database schema and indexes, phrase search, the `describe_dataset` tool and filter value checks.
+My teammate **Berkan Gürbüz** built the data loader, the data validation and the database schema.
 
 
 ---
