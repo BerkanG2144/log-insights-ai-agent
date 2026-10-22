@@ -112,24 +112,29 @@ We used AI coding assistants (Claude Code and Codex) throughout the hackathon.
 
 ## My contributions
 
-### MCP server and tools
-- Set up the MCP server and implemented the core tools `search_logs`, `nearby_events`, `count_by`, `trend` and `ping`
-- Implemented full-text search on the inverted index with BM25 ranking and deterministic result ordering
-- Implemented `nearby_events` centred on an anchor line (per node for BGL, per file for OpenStack)
-- Added the alert-label filter for BGL and fixed the truncation flag for groups with missing values
+### Data loader and parsers
+- Built the Python loader to stream and import the complete BGL and OpenStack datasets (4,747,963 and 207,820 lines) into SereneDB
+- Implemented the BGL and OpenStack parsers, preserving original log lines and source line numbers while handling format variants, missing fields and traceback lines
+- Added CSV preparation, SHA-256 integrity checks and transactional imports with rollback on failure
 
-### Evidence record and trend statistics
-- Designed the evidence record that every tool returns (query id, SQL, parameters, scope, counts, truncation, status)
-- Moved trend statistics (active days, first/last day, peak and peak share) into the database, so the model no longer computes them itself
+### Database schema and data validation
+- Implemented the database schema for both log datasets, anomaly VM labels and team ownership, together with full-text index creation
+- Built 54 SQL validation checks covering row counts, parsed fields, reference cases, anomaly labels, ownership and search-index coverage
+- Added parser and database integration tests, including checks that failed replacement imports preserve the previous data
 
-### Role prompts
-- Wrote the shared evidence rules and the engineer, team lead and manager prompts
-- Gave the manager a fixed candidate set and ranking rule, so repeated answers stay comparable
+### Linux integration and investigation review
+- Set up and tested the complete workflow on Linux, including a fresh-checkout import and MCP integration checks
+- Ran and compared the engineer, team lead and manager investigations against the database evidence
+- Reviewed and corrected the worked investigation's subtotal, timing figures and claims about causes, persistence and incident counts
 
-### Documentation and testing (together with Berkan)
+### Text-filter fix
+- Fixed `count_by` and `trend` so `%` and `_` in text filters are treated as literal characters
+- Added regression tests for special characters and ordinary text searches
+
+### Documentation and testing (together with Celil)
 - Data and tool contract, clean-checkout tests on Windows and Linux, worked investigation, README
 
-My teammate **Berkan Gürbüz** built the data loader, the data validation and the database schema.
+My teammate **Celil Durna** built the MCP server and tools, the evidence record and trend statistics, and the role prompts.
 
 
 ---
